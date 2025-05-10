@@ -1,0 +1,80 @@
+import { describe, it, expect } from 'vitest';
+import { uiReducer, initialState } from './reducer';
+import { UIState, UISpecNode } from '../schema/ui';
+
+describe('uiReducer', () => {
+  it('should return the initial state', () => {
+    const state = uiReducer(initialState, { type: 'LOADING', isLoading: false });
+    expect(state.loading).toBe(false);
+    expect(state.history).toEqual([]);
+  });
+
+  it('should handle UI_EVENT action', () => {
+    const event = {
+      type: 'CLICK',
+      nodeId: 'button1',
+      timestamp: Date.now(),
+    };
+
+    const state = uiReducer(initialState, { type: 'UI_EVENT', event });
+    
+    expect(state.loading).toBe(true);
+    expect(state.history).toHaveLength(1);
+    expect(state.history[0]).toEqual(event);
+  });
+
+  it('should handle AI_RESPONSE action', () => {
+    const mockLayout: UISpecNode = {
+      id: 'root',
+      type: 'Container',
+      children: [
+        {
+          id: 'header',
+          type: 'Header',
+          props: { title: 'Test Header' },
+        }
+      ]
+    };
+
+    // Start with a state that has some history
+    const initialStateWithHistory: UIState = {
+      ...initialState,
+      history: [
+        { type: 'CLICK', nodeId: 'button1' }
+      ],
+      loading: true,
+    };
+
+    const state = uiReducer(
+      initialStateWithHistory, 
+      { type: 'AI_RESPONSE', node: mockLayout }
+    );
+    
+    expect(state.loading).toBe(false);
+    expect(state.layout).toEqual(mockLayout);
+    // History should be preserved
+    expect(state.history).toEqual(initialStateWithHistory.history);
+    // Error should be cleared
+    expect(state.error).toBeUndefined();
+  });
+
+  it('should handle ERROR action', () => {
+    const errorMessage = 'Something went wrong';
+    const state = uiReducer(
+      { ...initialState, loading: true }, 
+      { type: 'ERROR', message: errorMessage }
+    );
+    
+    expect(state.loading).toBe(false);
+    expect(state.error).toBe(errorMessage);
+  });
+
+  it('should handle LOADING action', () => {
+    const state = uiReducer(
+      { ...initialState, loading: false }, 
+      { type: 'LOADING', isLoading: true }
+    );
+    
+    expect(state.loading).toBe(true);
+  });
+});
