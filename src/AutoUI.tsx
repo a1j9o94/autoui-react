@@ -318,6 +318,8 @@ export const AutoUI: React.FC<AutoUIProps> = ({
   
   // Resolve bindings for the layout using the current data context
   const [resolvedLayout, setResolvedLayout] = useState<UISpecNode | undefined>(undefined);
+  // Add state for rendered node
+  const [renderedNode, setRenderedNode] = useState<React.ReactElement | null>(null);
   
   // Update the resolved layout whenever state.layout or dataContext changes
   useEffect(() => {
@@ -329,6 +331,18 @@ export const AutoUI: React.FC<AutoUIProps> = ({
       setResolvedLayout(undefined);
     }
   }, [state.layout, dataContext]);
+  
+  // Handle async rendering of the node
+  useEffect(() => {
+    if (resolvedLayout) {
+      // Render the node and update state when Promise resolves
+      renderNode(resolvedLayout, componentAdapter as "shadcn")
+        .then(rendered => setRenderedNode(rendered))
+        .catch(err => console.error('Error rendering node:', err));
+    } else {
+      setRenderedNode(null);
+    }
+  }, [resolvedLayout, componentAdapter]);
   
   // Render UI
   return (
@@ -353,7 +367,7 @@ export const AutoUI: React.FC<AutoUIProps> = ({
       ) : (
         // Render the resolved layout
         <div className="autoui-content">
-          {renderNode(resolvedLayout, componentAdapter as "shadcn")}
+          {renderedNode}
         </div>
       )}
       

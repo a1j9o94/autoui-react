@@ -6,7 +6,7 @@ export {
   type ActionRouteConfig,
 } from './core/action-router';
 
-// Export schema adapters// Export the main AutoUI component
+// Export the main AutoUI component
 export { AutoUI } from './AutoUI';
 export type { AutoUIProps } from './AutoUI';
 
@@ -53,3 +53,10 @@ export type {
   SchemaAdapterOptions,
   DrizzleAdapterOptions,
 } from './adapters/schema';
+
+// Export AI utilities
+export {
+  generateComponent,
+  generateUIDescription,
+  generateUIComponent,
+} from './ai-utils';
