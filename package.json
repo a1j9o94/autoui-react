@@ -1,6 +1,6 @@
 {
   "name": "autoui-react",
-  "version": "0.1.0",
+  "version": "0.0.2-alpha",
   "description": "Generate goal-oriented UIs in real-time using LLMs and your data schema",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -30,7 +30,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/oblet/autoui-react.git"
+    "url": "git+https://github.com/oblet/autoui-react.git"
   },
   "peerDependencies": {
     "react": "^18.0.0",
