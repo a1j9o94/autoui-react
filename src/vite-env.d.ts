@@ -2,6 +2,7 @@
 
 interface ImportMetaEnv {
   readonly VITE_MOCK_PLANNER: string;
+  readonly MODE: string;
   // more env variables...
 }
 

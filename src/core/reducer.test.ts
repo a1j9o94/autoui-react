@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { uiReducer, initialState } from './reducer';
-import { UIState, UISpecNode } from '../schema/ui';
+import { UIState, UISpecNode, UIEvent } from '../schema/ui';
 
 describe('uiReducer', () => {
   it('should return the initial state', () => {
@@ -10,7 +10,7 @@ describe('uiReducer', () => {
   });
 
   it('should handle UI_EVENT action', () => {
-    const event = {
+    const event: UIEvent = {
       type: 'CLICK',
       nodeId: 'button1',
       timestamp: Date.now(),
@@ -40,7 +40,7 @@ describe('uiReducer', () => {
     const initialStateWithHistory: UIState = {
       ...initialState,
       history: [
-        { type: 'CLICK', nodeId: 'button1' }
+        { type: 'CLICK', nodeId: 'button1' } as UIEvent
       ],
       loading: true,
     };

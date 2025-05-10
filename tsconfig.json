@@ -20,8 +20,9 @@
     "sourceMap": true,
     "outDir": "dist",
     "noImplicitAny": true,
-    "exactOptionalPropertyTypes": true
+    "exactOptionalPropertyTypes": true,
+    "allowImportingTsExtensions": true
   },
-  "include": ["src"],
+  "include": ["src", "example/ai-sdk-example.ts", "example/AIGeneratedUI.tsx", "example/basic-usage.ts"],
   "exclude": ["node_modules", "dist", "example"]
 }

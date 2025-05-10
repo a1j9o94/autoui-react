@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { UIEvent, UISpecNode, UIEventType } from './schema/ui';
 import { useUIStateEngine } from './core/state';
 import { renderNode, renderShimmer } from './core/renderer';
@@ -6,6 +6,7 @@ import { resolveBindings, DataContext, executeAction } from './core/bindings';
 import { EventManager, EventHook } from './core/events';
 import { SystemEventType, SystemEventHook, systemEvents } from './core/system-events';
 import { SchemaAdapter } from './adapters/schema';
+import { areShadcnComponentsAvailable, getMissingComponentsMessage } from './core/component-detection';
 import './styles/autoui.css';
 
 // Interface for DrizzleAdapterOptions
@@ -131,11 +132,20 @@ export const AutoUI: React.FC<AutoUIProps> = ({
   // Initialize schema adapter if provided
   const [schemaAdapterInstance, setSchemaAdapterInstance] = useState<SchemaAdapter | null>(null);
   const [dataContext, setDataContext] = useState<DataContext>({});
+  // Check if required components are available
+  const [componentsAvailable, setComponentsAvailable] = useState(true);
   
   // Use direct schema as the effective schema
   const effectiveSchema = schema as Record<string, unknown>;
   const scopedGoal = goal;
   // Pass undefined for the router - it will use the default in the useUIStateEngine function
+  
+  // Check if required components are available
+  useEffect(() => {
+    if (componentAdapter === 'shadcn') {
+      setComponentsAvailable(areShadcnComponentsAvailable());
+    }
+  }, [componentAdapter]);
   
   // Register system event hooks
   useEffect(() => {
@@ -343,6 +353,16 @@ export const AutoUI: React.FC<AutoUIProps> = ({
       setRenderedNode(null);
     }
   }, [resolvedLayout, componentAdapter]);
+  
+  // If components are not available, show error message
+  if (!componentsAvailable) {
+    return (
+      <div className="autoui-error p-4 border border-red-300 bg-red-50 text-red-700 rounded">
+        <p className="font-medium">Component Library Not Found</p>
+        <p className="text-sm whitespace-pre-line">{getMissingComponentsMessage()}</p>
+      </div>
+    );
+  }
   
   // Render UI
   return (

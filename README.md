@@ -242,3 +242,49 @@ MIT
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+## Component Adapters
+
+### shadcn/ui (Default)
+
+This library uses [shadcn/ui](https://ui.shadcn.com/) components by default. To set up these components in your project:
+
+```bash
+# Run the setup script to install required shadcn components
+npm run setup-shadcn
+```
+
+This will:
+1. Install Tailwind CSS if not already installed
+2. Set up the necessary shadcn/ui components
+3. Configure your project to use them
+
+After setup, make sure to import the CSS in your application:
+
+```jsx
+// In your main entry file (e.g., main.tsx, index.tsx)
+import "./src/tailwind.css";
+```
+
+### Custom Component Adapters
+
+You can create custom adapters for other component libraries by implementing an adapter module:
+
+```jsx
+// Create a custom adapter (e.g., for Material UI)
+import { Button, Table, Card } from '@mui/material';
+
+const materialAdapter = {
+  Button: (props) => <Button {...props} />,
+  Table: (props) => <Table {...props} />,
+  // ...
+};
+
+// Use your custom adapter
+<AutoUI 
+  schema={mySchema}
+  goal="Create a user dashboard"
+  componentAdapter="material" // Not yet supported in v0.1
+/>
+```
+
+Support for custom component adapters is planned for future releases.

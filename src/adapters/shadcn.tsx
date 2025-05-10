@@ -1,5 +1,6 @@
 import React from 'react';
 import { UISpecNode } from '../schema/ui';
+import { componentConfig, ComponentType } from '../schema/components';
 
 // This would typically import components from your shadcn UI library
 // For this example, we'll create placeholder components
@@ -36,16 +37,16 @@ const Container: React.FC<{ style?: React.CSSProperties; className?: string; chi
   </div>
 );
 
-const Header: React.FC<{ title: string }> = ({ title }) => (
-  <header className="py-4 px-6 border-b mb-4">
+const Header: React.FC<{ title: string; className?: string }> = ({ title, className }) => (
+  <header className={`py-4 px-6 border-b mb-4 ${className || ''}`}>
     <h1 className="text-xl font-semibold">{title}</h1>
   </header>
 );
 
 const Button: React.FC<{ 
-  onClick?: () => void; 
+  onClick?: (() => void) | undefined; 
   children: React.ReactNode;
-  variant?: 'default' | 'outline' | 'destructive';
+  variant?: 'default' | 'outline' | 'destructive' | undefined;
 }> = ({ onClick, children, variant = 'default' }) => (
   <button 
     className={`px-4 py-2 rounded font-medium ${
@@ -60,10 +61,10 @@ const Button: React.FC<{
 );
 
 const Table: React.FC<{
-  items?: any[];
-  fields?: { key: string; label: string }[];
-  onSelect?: (item: any) => void;
-  selectable?: boolean;
+  items?: any[] | undefined;
+  fields?: { key: string; label: string }[] | undefined;
+  onSelect?: ((item: any) => void) | undefined;
+  selectable?: boolean | undefined;
 }> = ({ items = [], fields = [], onSelect, selectable }) => (
   <div className="w-full border rounded-lg overflow-hidden">
     <table className="w-full">
@@ -96,11 +97,11 @@ const Table: React.FC<{
 );
 
 const Detail: React.FC<{
-  data?: any;
-  fields?: { key: string; label: string; type?: string }[];
-  title?: string;
-  visible?: boolean;
-  onBack?: () => void;
+  data?: any | undefined;
+  fields?: { key: string; label: string; type?: string }[] | undefined;
+  title?: string | undefined;
+  visible?: boolean | undefined;
+  onBack?: (() => void) | undefined;
 }> = ({ data, fields = [], title, visible = true, onBack }) => {
   if (!visible) return null;
   
@@ -171,7 +172,10 @@ export const adapterMap: Record<string, (node: UISpecNode) => React.ReactElement
   ),
   
   Header: (node) => (
-    <Header title={node.props?.title || 'Untitled'} />
+    <Header 
+      title={node.props?.title || 'Untitled'}
+      className={node.props?.className} 
+    />
   ),
   
   Button: (node) => (
@@ -219,3 +223,6 @@ export function renderNode(node: UISpecNode): React.ReactElement {
     </div>
   );
 }
+
+// Export the component configuration for reference
+export { componentConfig };
