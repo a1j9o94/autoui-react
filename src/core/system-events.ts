@@ -5,27 +5,27 @@ import { UISpecNode, PlannerInput } from "../schema/ui";
  */
 export enum SystemEventType {
   // Planning events
-  PLAN_START = 'PLAN_START',            // Before AI planning begins
-  PLAN_PROMPT_CREATED = 'PLAN_PROMPT_CREATED', // After prompt is built
-  PLAN_RESPONSE_CHUNK = 'PLAN_RESPONSE_CHUNK', // For each AI response chunk
-  PLAN_COMPLETE = 'PLAN_COMPLETE',      // After planning is complete
-  PLAN_ERROR = 'PLAN_ERROR',            // Planning error occurred
-  
+  PLAN_START = "PLAN_START", // Before AI planning begins
+  PLAN_PROMPT_CREATED = "PLAN_PROMPT_CREATED", // After prompt is built
+  PLAN_RESPONSE_CHUNK = "PLAN_RESPONSE_CHUNK", // For each AI response chunk
+  PLAN_COMPLETE = "PLAN_COMPLETE", // After planning is complete
+  PLAN_ERROR = "PLAN_ERROR", // Planning error occurred
+
   // Binding events
-  BINDING_RESOLUTION_START = 'BINDING_RESOLUTION_START', // Before bindings are resolved
-  BINDING_RESOLUTION_COMPLETE = 'BINDING_RESOLUTION_COMPLETE', // After bindings are resolved
-  
+  BINDING_RESOLUTION_START = "BINDING_RESOLUTION_START", // Before bindings are resolved
+  BINDING_RESOLUTION_COMPLETE = "BINDING_RESOLUTION_COMPLETE", // After bindings are resolved
+
   // Data events
-  DATA_FETCH_START = 'DATA_FETCH_START', // Before data is fetched
-  DATA_FETCH_COMPLETE = 'DATA_FETCH_COMPLETE', // After data is fetched
-  
+  DATA_FETCH_START = "DATA_FETCH_START", // Before data is fetched
+  DATA_FETCH_COMPLETE = "DATA_FETCH_COMPLETE", // After data is fetched
+
   // Rendering events
-  RENDER_START = 'RENDER_START',        // Before layout is rendered
-  RENDER_COMPLETE = 'RENDER_COMPLETE',  // After layout is rendered
-  
+  RENDER_START = "RENDER_START", // Before layout is rendered
+  RENDER_COMPLETE = "RENDER_COMPLETE", // After layout is rendered
+
   // Prefetch events (for future use)
-  PREFETCH_START = 'PREFETCH_START',    // Before prefetching begins
-  PREFETCH_COMPLETE = 'PREFETCH_COMPLETE', // After prefetching completes
+  PREFETCH_START = "PREFETCH_START", // Before prefetching begins
+  PREFETCH_COMPLETE = "PREFETCH_COMPLETE", // After prefetching completes
 }
 
 /**
@@ -153,10 +153,10 @@ export type SystemEventHook<T extends SystemEvent = AnySystemEvent> = (
  */
 export class SystemEventManager {
   private listeners: Partial<Record<SystemEventType, SystemEventHook[]>> = {};
-  
+
   /**
    * Register a listener for a specific system event type
-   * 
+   *
    * @param eventType - The system event type to listen for
    * @param listener - The listener function
    * @returns Function to unregister the listener
@@ -168,26 +168,26 @@ export class SystemEventManager {
     if (!this.listeners[eventType]) {
       this.listeners[eventType] = [];
     }
-    
+
     this.listeners[eventType]?.push(listener as SystemEventHook);
-    
+
     return () => {
       if (this.listeners[eventType]) {
         this.listeners[eventType] = this.listeners[eventType]?.filter(
-          l => l !== listener
+          (l) => l !== listener
         );
       }
     };
   }
-  
+
   /**
    * Emit a system event to all registered listeners
-   * 
+   *
    * @param event - The system event to emit
    */
   public async emit<T extends AnySystemEvent>(event: T): Promise<void> {
     const listeners = this.listeners[event.type] || [];
-    
+
     for (const listener of listeners) {
       await listener(event);
     }
@@ -199,14 +199,14 @@ export const systemEvents = new SystemEventManager();
 
 /**
  * Helper to create a typed system event
- * 
+ *
  * @param type - The system event type
  * @param data - Additional event data
  * @returns A system event object
  */
 export function createSystemEvent<T extends SystemEventType>(
   type: T,
-  data: Omit<Extract<AnySystemEvent, { type: T }>, 'type' | 'timestamp'>
+  data: Omit<Extract<AnySystemEvent, { type: T }>, "type" | "timestamp">
 ): Extract<AnySystemEvent, { type: T }> {
   return {
     type,

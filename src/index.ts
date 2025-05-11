@@ -4,18 +4,14 @@ export {
   ActionType,
   createDefaultRouter,
   type ActionRouteConfig,
-} from './core/action-router';
+} from "./core/action-router";
 
 // Export the main AutoUI component
-export { AutoUI } from './AutoUI';
-export type { AutoUIProps } from './AutoUI';
+export { AutoUI } from "./AutoUI";
+export type { AutoUIProps } from "./AutoUI";
 
 // Export core types for public use
-export {
-  uiSpecNode,
-  uiEvent,
-  uiEventType,
-} from './schema/ui';
+export { uiSpecNode, uiEvent, uiEventType } from "./schema/ui";
 
 export type {
   UISpecNode,
@@ -23,7 +19,7 @@ export type {
   UIEventType,
   UIState,
   PlannerInput,
-} from './schema/ui';
+} from "./schema/ui";
 
 // Export event system
 export {
@@ -31,7 +27,7 @@ export {
   type EventHook,
   type EventHookContext,
   type EventHookOptions,
-} from './core/events';
+} from "./core/events";
 
 // Export system events
 export {
@@ -40,23 +36,23 @@ export {
   createSystemEvent,
   type SystemEventHook,
   type AnySystemEvent,
-} from './core/system-events';
+} from "./core/system-events";
 
 // Export schema adapters
-export {
-  createSchemaAdapter,
-  DrizzleAdapter,
-} from './adapters/schema';
+export { createSchemaAdapter, DrizzleAdapter } from "./adapters/schema";
 
 export type {
   SchemaAdapter,
   SchemaAdapterOptions,
   DrizzleAdapterOptions,
-} from './adapters/schema';
+} from "./adapters/schema";
 
 // Export AI utilities
 export {
   generateComponent,
   generateUIDescription,
   generateUIComponent,
-} from './ai-utils';
+} from "./ai-utils";
+
+// Export hooks
+export { usePlanner } from "./hooks";

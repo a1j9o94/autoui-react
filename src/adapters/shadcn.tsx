@@ -1,6 +1,6 @@
-import React from 'react';
-import { UISpecNode } from '../schema/ui';
-import { componentConfig, ComponentType } from '../schema/components';
+import React from "react";
+import { UISpecNode } from "../schema/ui";
+import { componentConfig, ComponentType } from "../schema/components";
 
 // This would typically import components from your shadcn UI library
 // For this example, we'll create placeholder components
@@ -31,28 +31,48 @@ export const ShimmerCard: React.FC = () => (
 );
 
 // Mock ShadCN components for demonstration
-const Container: React.FC<{ style?: React.CSSProperties; className?: string; children?: React.ReactNode }> = (props) => (
-  <div className={`w-full ${props.className || ''}`} style={props.style}>
+const Container: React.FC<{
+  style?: React.CSSProperties;
+  className?: string;
+  children?: React.ReactNode;
+}> = (props) => (
+  <div
+    className={`w-full text-gray-800 dark:text-gray-100 ${
+      props.className || ""
+    }`}
+    style={{ ...props.style, color: "inherit" }}
+  >
     {props.children}
   </div>
 );
 
-const Header: React.FC<{ title: string; className?: string }> = ({ title, className }) => (
-  <header className={`py-4 px-6 border-b mb-4 ${className || ''}`}>
-    <h1 className="text-xl font-semibold">{title}</h1>
+const Header: React.FC<{ title: string; className?: string }> = ({
+  title,
+  className,
+}) => (
+  <header
+    className={`py-4 px-6 border-b border-gray-300 mb-4 bg-gray-50 dark:bg-gray-800 ${
+      className || ""
+    }`}
+  >
+    <h1 className="text-xl font-semibold text-gray-800 dark:text-white">
+      {title}
+    </h1>
   </header>
 );
 
-const Button: React.FC<{ 
-  onClick?: (() => void) | undefined; 
+const Button: React.FC<{
+  onClick?: (() => void) | undefined;
   children: React.ReactNode;
-  variant?: 'default' | 'outline' | 'destructive' | undefined;
-}> = ({ onClick, children, variant = 'default' }) => (
-  <button 
-    className={`px-4 py-2 rounded font-medium ${
-      variant === 'default' ? 'bg-blue-600 text-white' : 
-      variant === 'outline' ? 'border border-gray-300 text-gray-700' :
-      'bg-red-600 text-white'
+  variant?: "default" | "outline" | "destructive" | undefined;
+}> = ({ onClick, children, variant = "default" }) => (
+  <button
+    className={`px-4 py-2 rounded-md font-medium transition-colors ${
+      variant === "default"
+        ? "bg-blue-600 text-white hover:bg-blue-700"
+        : variant === "outline"
+        ? "border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+        : "bg-red-600 text-white hover:bg-red-700"
     }`}
     onClick={onClick}
   >
@@ -66,26 +86,36 @@ const Table: React.FC<{
   onSelect?: ((item: any) => void) | undefined;
   selectable?: boolean | undefined;
 }> = ({ items = [], fields = [], onSelect, selectable }) => (
-  <div className="w-full border rounded-lg overflow-hidden">
+  <div className="w-full border border-gray-300 dark:border-gray-700 rounded-lg overflow-hidden shadow-sm">
     <table className="w-full">
-      <thead className="bg-gray-50">
+      <thead className="bg-gray-100 dark:bg-gray-800 border-b border-gray-300 dark:border-gray-700">
         <tr>
           {fields.map((field) => (
-            <th key={field.key} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th
+              key={field.key}
+              className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider"
+            >
               {field.label}
             </th>
           ))}
         </tr>
       </thead>
-      <tbody className="bg-white divide-y divide-gray-200">
+      <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
         {items.map((item, index) => (
-          <tr 
+          <tr
             key={index}
             onClick={() => selectable && onSelect && onSelect(item)}
-            className={selectable ? 'cursor-pointer hover:bg-gray-50' : ''}
+            className={
+              selectable
+                ? "cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800"
+                : ""
+            }
           >
             {fields.map((field) => (
-              <td key={field.key} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+              <td
+                key={field.key}
+                className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 dark:text-gray-300"
+              >
                 {item[field.key]}
               </td>
             ))}
@@ -104,42 +134,59 @@ const Detail: React.FC<{
   onBack?: (() => void) | undefined;
 }> = ({ data, fields = [], title, visible = true, onBack }) => {
   if (!visible) return null;
-  
+
   return (
-    <div className="w-full border rounded-lg p-6 space-y-4">
-      <div className="flex justify-between items-center">
-        {title && <h2 className="text-lg font-medium">{title}</h2>}
+    <div className="w-full border border-gray-300 dark:border-gray-700 rounded-lg p-6 space-y-4 bg-white dark:bg-gray-900 shadow-sm">
+      <div className="flex justify-between items-center border-b border-gray-200 dark:border-gray-700 pb-3">
+        {title && (
+          <h2 className="text-lg font-medium text-gray-800 dark:text-white">
+            {title}
+          </h2>
+        )}
         {onBack && (
           <Button variant="outline" onClick={onBack}>
             Back
           </Button>
         )}
       </div>
-      
+
       <div className="space-y-4">
         {fields.map((field) => {
-          if (field.type === 'heading') {
+          if (field.type === "heading") {
             return (
-              <h3 key={field.key} className="text-xl font-semibold">
+              <h3
+                key={field.key}
+                className="text-xl font-semibold text-gray-800 dark:text-white"
+              >
                 {data?.[field.key]}
               </h3>
             );
           }
-          
-          if (field.type === 'content') {
+
+          if (field.type === "content") {
             return (
-              <div key={field.key} className="text-sm text-gray-700">
+              <div
+                key={field.key}
+                className="text-sm text-gray-700 dark:text-gray-300"
+              >
                 {data?.[field.key]}
               </div>
             );
           }
-          
+
           return (
-            <div key={field.key} className="flex flex-col">
+            <div
+              key={field.key}
+              className="flex flex-col border-b border-gray-100 dark:border-gray-800 py-2"
+            >
               {field.label && (
-                <span className="text-xs text-gray-500">{field.label}</span>
+                <span className="text-xs text-gray-600 dark:text-gray-400 font-medium">
+                  {field.label}
+                </span>
               )}
-              <span className="text-sm">{data?.[field.key]}</span>
+              <span className="text-sm text-gray-800 dark:text-gray-200">
+                {data?.[field.key]}
+              </span>
             </div>
           );
         })}
@@ -152,7 +199,7 @@ const Detail: React.FC<{
 const createEventHandler = (node: UISpecNode, eventName: string) => {
   const eventConfig = node.events?.[eventName];
   if (!eventConfig) return undefined;
-  
+
   return () => {
     console.log(`Event triggered: ${eventName} on node ${node.id}`, {
       action: eventConfig.action,
@@ -164,61 +211,77 @@ const createEventHandler = (node: UISpecNode, eventName: string) => {
 };
 
 // Adapter function to map node types to shadcn components
-export const adapterMap: Record<string, (node: UISpecNode) => React.ReactElement> = {
+export const adapterMap: Record<
+  string,
+  (node: UISpecNode) => React.ReactElement
+> = {
   Container: (node) => (
-    <Container style={node.props?.style} className={node.props?.className}>
+    <Container
+      style={node.props?.style as React.CSSProperties}
+      className={node.props?.className as string}
+    >
       {node.children?.map((child) => renderNode(child))}
     </Container>
   ),
-  
+
   Header: (node) => (
-    <Header 
-      title={node.props?.title || 'Untitled'}
-      className={node.props?.className} 
+    <Header
+      title={(node.props?.title as string) || "Untitled"}
+      className={node.props?.className as string}
     />
   ),
-  
+
   Button: (node) => (
-    <Button 
-      variant={node.props?.variant} 
-      onClick={createEventHandler(node, 'onClick')}
+    <Button
+      variant={
+        node.props?.variant as "default" | "outline" | "destructive" | undefined
+      }
+      onClick={createEventHandler(node, "onClick")}
     >
-      {node.props?.label || 'Button'}
+      {(node.props?.label as string) || "Button"}
     </Button>
   ),
-  
+
   ListView: (node) => (
-    <Table 
-      items={node.bindings?.items || []}
-      fields={node.bindings?.fields || []}
-      selectable={node.props?.selectable}
-      onSelect={createEventHandler(node, 'onSelect')}
+    <Table
+      items={(node.bindings?.items as any[]) || []}
+      fields={(node.bindings?.fields as { key: string; label: string }[]) || []}
+      selectable={node.props?.selectable as boolean | undefined}
+      onSelect={createEventHandler(node, "onSelect")}
     />
   ),
-  
+
   Detail: (node) => (
-    <Detail 
+    <Detail
       data={node.bindings?.data}
-      fields={node.bindings?.fields || []}
-      title={node.props?.title}
+      fields={
+        (node.bindings?.fields as {
+          key: string;
+          label: string;
+          type?: string;
+        }[]) || []
+      }
+      title={node.props?.title as string}
       visible={node.props?.visible !== false}
-      onBack={createEventHandler(node, 'onBack')}
+      onBack={createEventHandler(node, "onBack")}
     />
   ),
 };
 
 // Helper to render a node using the adapter map
 export function renderNode(node: UISpecNode): React.ReactElement {
-  const Component = adapterMap[node.type];
-  
+  const Component = adapterMap[node.node_type];
+
   if (Component) {
     return Component(node);
   }
-  
+
   // Fallback for unsupported node types
   return (
     <div className="p-2 border border-red-300 rounded">
-      <p className="text-sm text-red-500">Unsupported component: {node.type}</p>
+      <p className="text-sm text-red-500">
+        Unsupported component: {node.node_type}
+      </p>
       {node.children?.map((child) => renderNode(child))}
     </div>
   );
