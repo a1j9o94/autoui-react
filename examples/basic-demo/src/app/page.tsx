@@ -108,7 +108,7 @@ export default function Home() {
         <AutoUI
           schema={exampleSchema}
           goal="Create a task management dashboard with list view and ability to view task details"
-          mockMode={false}
+          mockMode={true}
           debugMode={false}
           componentAdapter="shadcn"
           userContext={{

@@ -1,4 +1,4 @@
-import { UIAction, UIState, UISpecNode } from '../schema/ui';
+import { UIAction, UIState, UISpecNode } from "../schema/ui";
 
 /**
  * Deep clones a UI node tree
@@ -8,10 +8,12 @@ import { UIAction, UIState, UISpecNode } from '../schema/ui';
 function cloneNode(node: UISpecNode): UISpecNode {
   return {
     ...node,
-    props: node.props ? { ...node.props } : undefined,
-    bindings: node.bindings ? { ...node.bindings } : undefined,
-    events: node.events ? { ...node.events } : undefined,
-    children: node.children?.map(child => cloneNode(child)),
+    props: node.props ? { ...node.props } : null,
+    bindings: node.bindings ? { ...node.bindings } : null,
+    events: node.events ? { ...node.events } : null,
+    children: node.children
+      ? node.children.map((child) => cloneNode(child))
+      : null,
   };
 }
 
@@ -22,19 +24,19 @@ function cloneNode(node: UISpecNode): UISpecNode {
  * @returns The found node or undefined
  */
 export function findNodeById(
-  tree: UISpecNode | undefined, 
+  tree: UISpecNode | undefined,
   nodeId: string
 ): UISpecNode | undefined {
   if (!tree) return undefined;
   if (tree.id === nodeId) return tree;
-  
+
   if (tree.children) {
     for (const child of tree.children) {
       const found = findNodeById(child, nodeId);
       if (found) return found;
     }
   }
-  
+
   return undefined;
 }
 
@@ -52,7 +54,7 @@ export function updateNodeById(
 ): UISpecNode {
   // Clone the tree to avoid mutations
   const result = cloneNode(tree);
-  
+
   // Find the parent path to the node
   function findPath(
     node: UISpecNode,
@@ -60,53 +62,51 @@ export function updateNodeById(
     currentPath: UISpecNode[] = []
   ): UISpecNode[] | null {
     const newPath = [...currentPath, node];
-    
+
     if (node.id === id) {
       return newPath;
     }
-    
+
     if (node.children) {
       for (const child of node.children) {
         const path = findPath(child, id, newPath);
         if (path) return path;
       }
     }
-    
+
     return null;
   }
-  
+
   const path = findPath(result, nodeId);
   if (!path) return result; // Node not found, return original
-  
+
   // The last item in the path is the node to update
   const nodeToUpdate = path[path.length - 1];
   const updatedNode = updater(nodeToUpdate);
-  
+
   // If this is the root node, return the updated node
   if (path.length === 1) {
     return updatedNode;
   }
-  
+
   // Otherwise, update the parent's children
   const parent = path[path.length - 2];
   const updatedParent = {
     ...parent,
-    children: parent.children?.map(child => 
-      child.id === nodeId ? updatedNode : child
-    ),
+    children: parent.children
+      ? parent.children.map((child) =>
+          child.id === nodeId ? updatedNode : child
+        )
+      : null,
   };
-  
+
   // If the parent is root, return it
   if (path.length === 2) {
     return updatedParent;
   }
-  
+
   // Otherwise, recursively update up the tree
-  return updateNodeById(
-    result,
-    parent.id,
-    () => updatedParent
-  );
+  return updateNodeById(result, parent.id, () => updatedParent);
 }
 
 /**
@@ -140,13 +140,13 @@ export function addChildNode(
 ): UISpecNode {
   return updateNodeById(tree, parentId, (node) => {
     const children = node.children ? [...node.children] : [];
-    
+
     if (index !== undefined && index >= 0 && index <= children.length) {
       children.splice(index, 0, newChild);
     } else {
       children.push(newChild);
     }
-    
+
     return {
       ...node,
       children,
@@ -160,44 +160,40 @@ export function addChildNode(
  * @param nodeId - ID of the node to remove
  * @returns Updated UI tree
  */
-export function removeNodeById(
-  tree: UISpecNode,
-  nodeId: string
-): UISpecNode {
+export function removeNodeById(tree: UISpecNode, nodeId: string): UISpecNode {
   // Find the parent of the node
-  function findParent(
-    node: UISpecNode,
-    id: string
-  ): UISpecNode | null {
+  function findParent(node: UISpecNode, id: string): UISpecNode | null {
     if (node.children) {
-      if (node.children.some(child => child.id === id)) {
+      if (node.children.some((child) => child.id === id)) {
         return node;
       }
-      
+
       for (const child of node.children) {
         const parent = findParent(child, id);
         if (parent) return parent;
       }
     }
-    
+
     return null;
   }
-  
+
   // Clone the tree to avoid mutations
   const result = cloneNode(tree);
-  
+
   // If trying to remove the root, return empty tree
   if (result.id === nodeId) {
-    throw new Error('Cannot remove root node');
+    throw new Error("Cannot remove root node");
   }
-  
+
   const parent = findParent(result, nodeId);
   if (!parent) return result; // Node not found, return original
-  
+
   // Update the parent by filtering out the node
   return updateNodeById(result, parent.id, (node) => ({
     ...node,
-    children: node.children?.filter(child => child.id !== nodeId),
+    children: node.children
+      ? node.children.filter((child) => child.id !== nodeId)
+      : null,
   }));
 }
 
@@ -209,7 +205,7 @@ export function removeNodeById(
  */
 export function uiReducer(state: UIState, action: UIAction): UIState {
   switch (action.type) {
-    case 'UI_EVENT': {
+    case "UI_EVENT": {
       // Add the event to history and set loading state
       return {
         ...state,
@@ -218,93 +214,106 @@ export function uiReducer(state: UIState, action: UIAction): UIState {
       };
     }
 
-    case 'AI_RESPONSE': {
+    case "AI_RESPONSE": {
       // Replace the layout with the new node and set loading to false
       return {
         ...state,
         layout: action.node,
         loading: false,
-        error: undefined,
+        error: null,
       };
     }
-    
-    case 'PARTIAL_UPDATE': {
+
+    case "PARTIAL_UPDATE": {
       if (!state.layout) {
         return {
           ...state,
           layout: action.node,
           loading: false,
-          error: undefined,
+          error: null,
         };
       }
-      
+
       // Find the node to update
-      if (action.nodeId === 'root' || action.nodeId === state.layout.id) {
+      if (action.nodeId === "root" || action.nodeId === state.layout.id) {
         // Root node replacement
         return {
           ...state,
           layout: action.node,
           loading: false,
-          error: undefined,
+          error: null,
         };
       }
-      
+
       // Replace a specific node in the tree
       return {
         ...state,
         layout: replaceNodeById(state.layout, action.nodeId, action.node),
         loading: false,
-        error: undefined,
+        error: null,
       };
     }
-    
-    case 'ADD_NODE': {
+
+    case "ADD_NODE": {
       if (!state.layout) {
-        return state;
+        // Cannot add to a null layout, perhaps set the new node as root or error
+        return {
+          ...state,
+          error: "Cannot add node: Layout is empty.",
+          loading: false,
+        };
       }
-      
-      // Add a child node to a specific parent
       return {
         ...state,
         layout: addChildNode(
-          state.layout, 
-          action.parentId, 
-          action.node, 
-          action.index
+          state.layout,
+          action.parentId,
+          action.node,
+          action.index === null ? undefined : action.index
         ),
         loading: false,
-        error: undefined,
+        error: null,
       };
     }
-    
-    case 'REMOVE_NODE': {
+
+    case "REMOVE_NODE": {
       if (!state.layout) {
-        return state;
+        return {
+          ...state,
+          error: "Cannot remove node: Layout is empty.",
+          loading: false,
+        };
       }
-      
-      // Remove a node from the tree
-      return {
-        ...state,
-        layout: removeNodeById(state.layout, action.nodeId),
-        loading: false,
-        error: undefined,
-      };
+      try {
+        return {
+          ...state,
+          layout: removeNodeById(state.layout, action.nodeId),
+          loading: false,
+          error: null,
+        };
+      } catch (e: unknown) {
+        const errorMessage =
+          e instanceof Error ? e.message : "Failed to remove node.";
+        return {
+          ...state,
+          error: errorMessage,
+          loading: false,
+        };
+      }
     }
 
-    case 'LOADING': {
-      // Update loading state
-      return {
-        ...state,
-        loading: action.isLoading,
-      };
-    }
-
-    case 'ERROR': {
-      // Set error and loading to false
+    case "ERROR": {
       return {
         ...state,
         error: action.message,
         loading: false,
+      };
+    }
+
+    case "LOADING": {
+      return {
+        ...state,
+        loading: action.isLoading,
       };
     }
 
@@ -317,6 +326,8 @@ export function uiReducer(state: UIState, action: UIAction): UIState {
  * Initial state for the UI state engine
  */
 export const initialState: UIState = {
-  loading: true,
+  layout: null,
+  loading: false,
   history: [],
+  error: null,
 };

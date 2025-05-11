@@ -1,5 +1,5 @@
-import { DataContext } from '../../core/bindings';
-import { DrizzleAdapter, DrizzleAdapterOptions } from './drizzle';
+import { DataContext } from "../../core/bindings";
+import { DrizzleAdapter, DrizzleAdapterOptions } from "./drizzle";
 
 /**
  * Generic schema adapter interface
@@ -13,25 +13,26 @@ export interface SchemaAdapter {
 /**
  * Schema adapter options union type
  */
-export type SchemaAdapterOptions = 
-  | { type: 'drizzle'; options: DrizzleAdapterOptions }
-  | { type: 'custom'; adapter: SchemaAdapter };
+export type SchemaAdapterOptions =
+  | { type: "drizzle"; options: DrizzleAdapterOptions }
+  | { type: "custom"; adapter: SchemaAdapter };
 
 /**
  * Factory function to create the appropriate schema adapter
  */
-export function createSchemaAdapter(options: SchemaAdapterOptions): SchemaAdapter {
+export function createSchemaAdapter(
+  options: SchemaAdapterOptions
+): SchemaAdapter {
   switch (options.type) {
-    case 'drizzle':
+    case "drizzle":
       return new DrizzleAdapter(options.options);
-    case 'custom':
+    case "custom":
       return options.adapter;
     default:
-      throw new Error(`Unsupported schema adapter type: ${(options as any).type}`);
+      throw new Error(
+        `Unsupported schema adapter type: ${(options as any).type}`
+      );
   }
 }
 
-export {
-  DrizzleAdapter,
-  type DrizzleAdapterOptions,
-};
+export { DrizzleAdapter, type DrizzleAdapterOptions };

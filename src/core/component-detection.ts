@@ -5,7 +5,7 @@
 export function areShadcnComponentsAvailable(): boolean {
   try {
     // Try to require one of the shadcn components
-    require('../../components/ui/button');
+    require("../../components/ui/button");
     return true;
   } catch (error) {
     return false;
