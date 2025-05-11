@@ -1,6 +1,6 @@
 import React from "react";
-import { UISpecNode } from "../schema/ui";
-import { componentConfig, ComponentType } from "../schema/components";
+import { UISpecNode, UIEvent, UIEventType } from "../schema/ui";
+import { componentConfig } from "../schema/components";
 
 // This would typically import components from your shadcn UI library
 // For this example, we'll create placeholder components
@@ -36,12 +36,7 @@ const Container: React.FC<{
   className?: string;
   children?: React.ReactNode;
 }> = (props) => (
-  <div
-    className={`w-full text-gray-800 dark:text-gray-100 ${
-      props.className || ""
-    }`}
-    style={{ ...props.style, color: "inherit" }}
-  >
+  <div className={`autoui-mock-container ${props.className || ""}`}>
     {props.children}
   </div>
 );
@@ -81,9 +76,9 @@ const Button: React.FC<{
 );
 
 const Table: React.FC<{
-  items?: any[] | undefined;
+  items?: Record<string, React.ReactNode>[] | undefined;
   fields?: { key: string; label: string }[] | undefined;
-  onSelect?: ((item: any) => void) | undefined;
+  onSelect?: ((item: Record<string, React.ReactNode>) => void) | undefined;
   selectable?: boolean | undefined;
 }> = ({ items = [], fields = [], onSelect, selectable }) => (
   <div className="w-full border border-gray-300 dark:border-gray-700 rounded-lg overflow-hidden shadow-sm">
@@ -116,7 +111,7 @@ const Table: React.FC<{
                 key={field.key}
                 className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 dark:text-gray-300"
               >
-                {item[field.key]}
+                {item[field.key] ?? ""}
               </td>
             ))}
           </tr>
@@ -127,7 +122,7 @@ const Table: React.FC<{
 );
 
 const Detail: React.FC<{
-  data?: any | undefined;
+  data?: Record<string, React.ReactNode> | undefined;
   fields?: { key: string; label: string; type?: string }[] | undefined;
   title?: string | undefined;
   visible?: boolean | undefined;
@@ -158,7 +153,7 @@ const Detail: React.FC<{
                 key={field.key}
                 className="text-xl font-semibold text-gray-800 dark:text-white"
               >
-                {data?.[field.key]}
+                {data?.[field.key] ?? ""}
               </h3>
             );
           }
@@ -169,7 +164,7 @@ const Detail: React.FC<{
                 key={field.key}
                 className="text-sm text-gray-700 dark:text-gray-300"
               >
-                {data?.[field.key]}
+                {data?.[field.key] ?? ""}
               </div>
             );
           }
@@ -185,7 +180,7 @@ const Detail: React.FC<{
                 </span>
               )}
               <span className="text-sm text-gray-800 dark:text-gray-200">
-                {data?.[field.key]}
+                {data?.[field.key] ?? ""}
               </span>
             </div>
           );
@@ -195,95 +190,214 @@ const Detail: React.FC<{
   );
 };
 
-// Mock implementation - in a real application, this would dispatch events to your state engine
-const createEventHandler = (node: UISpecNode, eventName: string) => {
-  const eventConfig = node.events?.[eventName];
-  if (!eventConfig) return undefined;
+const getSafeProp = <T, K extends string, D extends T>(
+  props: Record<string, unknown> | null | undefined,
+  key: K,
+  validator: (value: unknown) => value is T,
+  defaultValue: D
+): T | D => {
+  if (props && typeof props === "object" && key in props) {
+    const value = props[key];
+    if (validator(value)) {
+      return value;
+    }
+  }
+  return defaultValue;
+};
 
-  return () => {
-    console.log(`Event triggered: ${eventName} on node ${node.id}`, {
-      action: eventConfig.action,
-      target: eventConfig.target,
-      payload: eventConfig.payload,
-    });
-    // In real implementation: dispatch({ type: 'UI_EVENT', event: { ... } })
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+const isString = (value: unknown): value is string => typeof value === "string";
+const isBoolean = (value: unknown): value is boolean =>
+  typeof value === "boolean";
+const isCSSProperties = (value: unknown): value is React.CSSProperties =>
+  isObject(value); // Simplified check
+const isButtonVariant = (
+  value: unknown
+): value is "default" | "outline" | "destructive" =>
+  isString(value) && ["default", "outline", "destructive"].includes(value);
+
+const getSafeBinding = <T, K extends string, D extends T>(
+  bindings: Record<string, unknown> | null | undefined,
+  key: K,
+  validator: (value: unknown) => value is T,
+  defaultValue: D
+): T | D => {
+  if (bindings && typeof bindings === "object" && key in bindings) {
+    const value = bindings[key];
+    if (validator(value)) {
+      return value;
+    }
+  }
+  return defaultValue;
+};
+
+const isArrayOf =
+  <T extends object>(itemValidator: (item: unknown) => item is T) =>
+  (arr: unknown): arr is T[] =>
+    Array.isArray(arr) && arr.every(itemValidator);
+
+const isReactNode = (value: unknown): value is React.ReactNode => {
+  // This is a simplified check. A full check is complex.
+  // For basic scenarios, we can check for string, number, boolean, null, undefined, or React elements.
+  return (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value === null ||
+    typeof value === "undefined" ||
+    (typeof value === "object" && value !== null && "$$typeof" in value) // Basic check for React element
+  );
+};
+
+const isRecordWithReactNodeValues = (
+  value: unknown
+): value is Record<string, React.ReactNode> =>
+  isObject(value) && Object.values(value).every(isReactNode);
+
+const isFieldObject = (item: unknown): item is { key: string; label: string } =>
+  isObject(item) && isString(item.key) && isString(item.label);
+
+const isDetailFieldObject = (
+  item: unknown
+): item is { key: string; label: string; type?: string } =>
+  isObject(item) &&
+  isString(item.key) &&
+  isString(item.label) &&
+  (item.type === undefined || isString(item.type));
+
+// Mock implementation - in a real application, this would dispatch events to your state engine
+const createEventHandler = (
+  node: UISpecNode,
+  eventName: string,
+  uiEventType: UIEventType,
+  processEvent?: (event: UIEvent) => void
+) => {
+  const eventConfig = node.events?.[uiEventType];
+  if (!processEvent || !eventConfig) return undefined;
+
+  return (eventPayload?: Record<string, unknown>) => {
+    const fullEvent: UIEvent = {
+      type: uiEventType,
+      nodeId: node.id,
+      timestamp: Date.now(),
+      payload: {
+        ...(eventConfig.payload || {}),
+        ...(eventPayload || {}),
+      },
+    };
+    processEvent(fullEvent);
   };
 };
 
-// Adapter function to map node types to shadcn components
 export const adapterMap: Record<
   string,
-  (node: UISpecNode) => React.ReactElement
+  (
+    node: UISpecNode,
+    processEvent?: (event: UIEvent) => void
+  ) => React.ReactElement
 > = {
-  Container: (node) => (
+  Container: (node, processEvent) => (
     <Container
-      style={node.props?.style as React.CSSProperties}
-      className={node.props?.className as string}
+      style={getSafeProp(node.props, "style", isCSSProperties, {})}
+      className={getSafeProp(node.props, "className", isString, "")}
     >
-      {node.children?.map((child) => renderNode(child))}
+      {node.children?.map((child) => renderNode(child, processEvent))}
     </Container>
   ),
 
   Header: (node) => (
     <Header
-      title={(node.props?.title as string) || "Untitled"}
-      className={node.props?.className as string}
+      title={getSafeProp(node.props, "title", isString, "Untitled")}
+      className={getSafeProp(node.props, "className", isString, "")}
     />
   ),
 
-  Button: (node) => (
+  Button: (node, processEvent) => (
     <Button
-      variant={
-        node.props?.variant as "default" | "outline" | "destructive" | undefined
-      }
-      onClick={createEventHandler(node, "onClick")}
+      variant={getSafeProp(node.props, "variant", isButtonVariant, "default")}
+      onClick={createEventHandler(node, "onClick", "CLICK", processEvent)}
     >
-      {(node.props?.label as string) || "Button"}
+      {getSafeProp(node.props, "label", isString, "Button")}
     </Button>
   ),
 
-  ListView: (node) => (
-    <Table
-      items={(node.bindings?.items as any[]) || []}
-      fields={(node.bindings?.fields as { key: string; label: string }[]) || []}
-      selectable={node.props?.selectable as boolean | undefined}
-      onSelect={createEventHandler(node, "onSelect")}
-    />
-  ),
+  ListView: (node, processEvent) => {
+    const items = getSafeBinding(
+      node.bindings,
+      "items",
+      isArrayOf(isRecordWithReactNodeValues),
+      []
+    );
+    const fields = getSafeBinding(
+      node.bindings,
+      "fields",
+      isArrayOf(isFieldObject),
+      []
+    );
+    const selectable = getSafeProp(node.props, "selectable", isBoolean, false);
 
-  Detail: (node) => (
-    <Detail
-      data={node.bindings?.data}
-      fields={
-        (node.bindings?.fields as {
-          key: string;
-          label: string;
-          type?: string;
-        }[]) || []
-      }
-      title={node.props?.title as string}
-      visible={node.props?.visible !== false}
-      onBack={createEventHandler(node, "onBack")}
-    />
-  ),
+    return (
+      <Table
+        items={items as Record<string, React.ReactNode>[]}
+        fields={fields}
+        selectable={selectable}
+        onSelect={(item) => {
+          const handler = createEventHandler(
+            node,
+            "onSelect",
+            "CLICK",
+            processEvent
+          );
+          if (handler) {
+            handler({ selectedItem: item });
+          }
+        }}
+      />
+    );
+  },
+
+  Detail: (node, processEvent) => {
+    const data = getSafeBinding(
+      node.bindings,
+      "data",
+      isRecordWithReactNodeValues,
+      {}
+    ) as Record<string, React.ReactNode>;
+    const fields = getSafeBinding(
+      node.bindings,
+      "fields",
+      isArrayOf(isDetailFieldObject),
+      []
+    );
+    const title = getSafeProp(node.props, "title", isString, "");
+    const visible = getSafeProp(node.props, "visible", isBoolean, true);
+
+    return (
+      <Detail
+        data={data}
+        fields={fields}
+        title={title}
+        visible={visible}
+        onBack={createEventHandler(node, "onBack", "CLICK", processEvent)}
+      />
+    );
+  },
 };
 
-// Helper to render a node using the adapter map
-export function renderNode(node: UISpecNode): React.ReactElement {
-  const Component = adapterMap[node.node_type];
-
-  if (Component) {
-    return Component(node);
+export function renderNode(
+  node: UISpecNode,
+  processEvent?: (event: UIEvent) => void
+): React.ReactElement {
+  const mappedComponent = adapterMap[node.node_type];
+  if (mappedComponent) {
+    return mappedComponent(node, processEvent);
   }
-
-  // Fallback for unsupported node types
-  return (
-    <div className="p-2 border border-red-300 rounded">
-      <p className="text-sm text-red-500">
-        Unsupported component: {node.node_type}
-      </p>
-      {node.children?.map((child) => renderNode(child))}
-    </div>
+  console.warn(`Unknown node type: ${node.node_type}`);
+  return React.createElement(
+    Container,
+    {},
+    `Unknown node type: ${node.node_type}`
   );
 }
 

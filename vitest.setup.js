@@ -1,3 +1,5 @@
+import '@testing-library/jest-dom';
+
 // Global test setup here
 // This file is run before all tests
 

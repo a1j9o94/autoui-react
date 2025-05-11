@@ -1,5 +1,5 @@
 import React from "react";
-import { UISpecNode } from "../schema/ui";
+import { UISpecNode, UIEvent } from "../schema/ui";
 import {
   renderNode as renderShadcnNode,
   ShimmerBlock,
@@ -25,11 +25,13 @@ const CACHE_TTL = 5000; // 5 seconds
  * Renders a UI node using the appropriate adapter
  * @param node - UI specification node
  * @param adapter - Component adapter (default: "shadcn")
+ * @param processEvent - Optional callback to handle UI events
  * @returns React element
  */
 export async function renderNode(
   node: UISpecNode,
-  adapter: "shadcn" = "shadcn"
+  adapter: "shadcn" = "shadcn",
+  processEvent?: (event: UIEvent) => void
 ): Promise<React.ReactElement> {
   const startTime = Date.now();
   const nodeId = node.id;
@@ -51,11 +53,11 @@ export async function renderNode(
 
   switch (adapter) {
     case "shadcn":
-      result = renderShadcnNode(node);
+      result = renderShadcnNode(node, processEvent);
       break;
     default:
       console.warn(`Unsupported adapter: ${adapter}, falling back to shadcn`);
-      result = renderShadcnNode(node);
+      result = renderShadcnNode(node, processEvent);
   }
 
   // Emit render complete event

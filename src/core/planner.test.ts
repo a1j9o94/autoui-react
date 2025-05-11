@@ -29,6 +29,7 @@ vi.mock("./system-events", () => ({
 vi.mock("../env", () => ({
   env: {
     MOCK_PLANNER: "0",
+    OPENAI_API_KEY: process.env.VITE_OPENAI_API_KEY,
   },
 }));
 
@@ -91,7 +92,7 @@ describe("Planner", () => {
       };
 
       const customPrompt = "This is a custom prompt";
-      const prompt = buildPrompt(input, undefined, customPrompt);
+      const prompt = buildPrompt(input, customPrompt);
 
       expect(prompt).toBe(customPrompt);
     });
@@ -152,7 +153,7 @@ describe("Planner", () => {
   });
 
   // Conditionally run real LLM tests only if OPENAI_API_KEY is present
-  (process.env.OPENAI_API_KEY ? describe : describe.skip)(
+  (process.env.VITE_OPENAI_API_KEY ? describe : describe.skip)(
     "Integration with real LLM",
     () => {
       it("should generate UI with a real LLM call", async () => {

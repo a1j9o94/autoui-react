@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { UISpecNode } from "../schema/ui";
+import { UISpecNode, UIEvent } from "../schema/ui";
 import * as ShadcnAdapter from "../adapters/shadcn";
 // import * as SystemEvents from './system-events'; // Original import for type, vi.mock will handle the module itself
 
@@ -18,9 +18,16 @@ const { mockSystemEventsEmit, mockCreateSystemEvent } = vi.hoisted(() => {
 
 // Mock shadcn adapter
 vi.mock("../adapters/shadcn", () => ({
-  renderNode: vi.fn((node: UISpecNode) => (
-    <div data-testid={node.id}>Mock-{node.node_type}</div>
-  )),
+  renderNode: vi.fn(
+    (node: UISpecNode, processEvent?: (event: UIEvent) => void) => {
+      if (processEvent) {
+        console.log("Unexpected value for processEvent", processEvent);
+      }
+      return (
+        <div data-testid={node.id}>Mock-{node.node_type}</div>
+      );
+    }
+  ),
   ShimmerBlock: () => <div data-testid="shimmer-block">ShimmerBlock</div>,
   ShimmerTable: ({ rows }: { rows: number }) => (
     <div data-testid="shimmer-table">ShimmerTable({rows})</div>
@@ -78,7 +85,10 @@ describe("Renderer", () => {
 
     it("should call the shadcn adapter by default and emit render events", async () => {
       await rendererModule.renderNode(testNode);
-      expect(ShadcnAdapter.renderNode).toHaveBeenCalledWith(testNode);
+      expect(ShadcnAdapter.renderNode).toHaveBeenCalledWith(
+        testNode,
+        undefined
+      );
       expect(mockSystemEventsEmit).toHaveBeenCalledWith(
         expect.objectContaining({
           type: (
@@ -171,12 +181,15 @@ describe("Renderer", () => {
 
       // @ts-expect-error Testing unsupported adapter
       await rendererModule.renderNode(testNode, "unsupported-adapter");
-      
-      expect(ShadcnAdapter.renderNode).toHaveBeenCalledWith(testNode);
+
+      expect(ShadcnAdapter.renderNode).toHaveBeenCalledWith(
+        testNode,
+        undefined
+      );
       expect(consoleWarnSpy).toHaveBeenCalledWith(
         "Unsupported adapter: unsupported-adapter, falling back to shadcn"
       );
-      
+
       consoleWarnSpy.mockRestore();
     });
   });
@@ -184,12 +197,16 @@ describe("Renderer", () => {
   describe("renderShimmer", () => {
     it("should render ShimmerBlock by default if no node is provided", () => {
       const shimmerElement = rendererModule.renderShimmer();
-      if (typeof shimmerElement.type === 'function') {
-        const ShimmerComponent = shimmerElement.type as (props: unknown) => React.ReactElement;
+      if (typeof shimmerElement.type === "function") {
+        const ShimmerComponent = shimmerElement.type as (
+          props: unknown
+        ) => React.ReactElement;
         const renderedOutput = ShimmerComponent(shimmerElement.props);
         expect(renderedOutput.props["data-testid"]).toBe("shimmer-block");
       } else {
-        throw new Error("Expected shimmerElement.type to be a function for ShimmerBlock");
+        throw new Error(
+          "Expected shimmerElement.type to be a function for ShimmerBlock"
+        );
       }
     });
 
@@ -203,12 +220,16 @@ describe("Renderer", () => {
         children: null,
       };
       const shimmerElement = rendererModule.renderShimmer(node);
-      if (typeof shimmerElement.type === 'function') {
-        const ShimmerComponent = shimmerElement.type as (props: unknown) => React.ReactElement;
+      if (typeof shimmerElement.type === "function") {
+        const ShimmerComponent = shimmerElement.type as (
+          props: unknown
+        ) => React.ReactElement;
         const renderedOutput = ShimmerComponent(shimmerElement.props);
         expect(renderedOutput.props["data-testid"]).toBe("shimmer-table");
       } else {
-        throw new Error("Expected shimmerElement.type to be a function for ShimmerTable");
+        throw new Error(
+          "Expected shimmerElement.type to be a function for ShimmerTable"
+        );
       }
     });
 
@@ -222,12 +243,16 @@ describe("Renderer", () => {
         children: null,
       };
       const shimmerElement = rendererModule.renderShimmer(node);
-      if (typeof shimmerElement.type === 'function') {
-        const ShimmerComponent = shimmerElement.type as (props: unknown) => React.ReactElement;
+      if (typeof shimmerElement.type === "function") {
+        const ShimmerComponent = shimmerElement.type as (
+          props: unknown
+        ) => React.ReactElement;
         const renderedOutput = ShimmerComponent(shimmerElement.props);
         expect(renderedOutput.props["data-testid"]).toBe("shimmer-card");
       } else {
-        throw new Error("Expected shimmerElement.type to be a function for ShimmerCard");
+        throw new Error(
+          "Expected shimmerElement.type to be a function for ShimmerCard"
+        );
       }
     });
 
@@ -241,19 +266,23 @@ describe("Renderer", () => {
         children: null,
       };
       const shimmerElement = rendererModule.renderShimmer(node);
-      if (typeof shimmerElement.type === 'function') {
-        const ShimmerComponent = shimmerElement.type as (props: unknown) => React.ReactElement;
+      if (typeof shimmerElement.type === "function") {
+        const ShimmerComponent = shimmerElement.type as (
+          props: unknown
+        ) => React.ReactElement;
         const renderedOutput = ShimmerComponent(shimmerElement.props);
         expect(renderedOutput.props["data-testid"]).toBe("shimmer-block");
       } else {
-        throw new Error("Expected shimmerElement.type to be a function for other ShimmerBlock");
+        throw new Error(
+          "Expected shimmerElement.type to be a function for other ShimmerBlock"
+        );
       }
     });
 
     it("should render nested shimmers for Container node", () => {
       const childNode1: UISpecNode = {
         id: "child1",
-        node_type: "Button", 
+        node_type: "Button",
         props: null,
         bindings: null,
         events: null,
@@ -261,7 +290,7 @@ describe("Renderer", () => {
       };
       const childNode2: UISpecNode = {
         id: "child2",
-        node_type: "ListView", 
+        node_type: "ListView",
         props: null,
         bindings: null,
         events: null,
@@ -275,15 +304,20 @@ describe("Renderer", () => {
         events: null,
         children: [childNode1, childNode2],
       };
-      const shimmerContainerElement = rendererModule.renderShimmer(containerNode);
+      const shimmerContainerElement =
+        rendererModule.renderShimmer(containerNode);
       expect(shimmerContainerElement.type).toBe("div");
       expect(shimmerContainerElement.props.children).toHaveLength(2);
 
       const child1Wrapper = shimmerContainerElement.props.children[0];
       const child1ShimmerElement = child1Wrapper.props.children;
-      if (typeof child1ShimmerElement.type === 'function') {
-        const Child1Component = child1ShimmerElement.type as (props: unknown) => React.ReactElement;
-        const child1RenderedOutput = Child1Component(child1ShimmerElement.props);
+      if (typeof child1ShimmerElement.type === "function") {
+        const Child1Component = child1ShimmerElement.type as (
+          props: unknown
+        ) => React.ReactElement;
+        const child1RenderedOutput = Child1Component(
+          child1ShimmerElement.props
+        );
         expect(child1RenderedOutput.props["data-testid"]).toBe("shimmer-block");
       } else {
         throw new Error("Expected child1ShimmerElement.type to be a function");
@@ -291,9 +325,13 @@ describe("Renderer", () => {
 
       const child2Wrapper = shimmerContainerElement.props.children[1];
       const child2ShimmerElement = child2Wrapper.props.children;
-      if (typeof child2ShimmerElement.type === 'function') {
-        const Child2Component = child2ShimmerElement.type as (props: unknown) => React.ReactElement;
-        const child2RenderedOutput = Child2Component(child2ShimmerElement.props);
+      if (typeof child2ShimmerElement.type === "function") {
+        const Child2Component = child2ShimmerElement.type as (
+          props: unknown
+        ) => React.ReactElement;
+        const child2RenderedOutput = Child2Component(
+          child2ShimmerElement.props
+        );
         expect(child2RenderedOutput.props["data-testid"]).toBe("shimmer-table");
       } else {
         throw new Error("Expected child2ShimmerElement.type to be a function");
