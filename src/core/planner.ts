@@ -1,6 +1,6 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateObject } from "ai";
-import { PlannerInput, UISpecNode, uiSpecNode, UIEvent } from "../schema/ui";
+import { PlannerInput, UISpecNode, openAIUISpec, UIEvent } from "../schema/ui";
 import {
   createSystemEvent,
   systemEvents,
@@ -24,7 +24,6 @@ const strictOpenAI = createOpenAI({
  */
 export function buildPrompt(
   input: PlannerInput,
-  targetNodeId?: string,
   customPrompt?: string
 ): string {
   const { schema, goal, history, userContext } = input;
@@ -77,7 +76,7 @@ type UISpecNode = {
   node_type: string;
   props?: Record<string, unknown>;
   bindings?: Record<string, unknown>;
-  events?: Record<string, { action: string; target: string; payload?: Record<string, unknown>; }};
+  events?: Record<string, { action: string; target: string; payload?: Record<string, unknown>; }>;
   children?: UISpecNode[];
 };
 
@@ -277,11 +276,27 @@ export async function callPlannerLLM(
   input: PlannerInput,
   routeResolution?: RouteResolution
 ): Promise<UISpecNode> {
-  console.log("🚀 callPlannerLLM called with input:", input);
-  console.log("🚀 Environment variables:", {
-    MOCK_PLANNER: env.MOCK_PLANNER,
-    OPENAI_API_KEY: env.OPENAI_API_KEY ? "Available" : "Not available",
-  });
+  // console.log("🚀 callPlannerLLM called with input:", input);
+  // console.log("🚀 Environment variables:", {
+  //   MOCK_PLANNER: env.MOCK_PLANNER,
+  //   OPENAI_API_KEY: env.OPENAI_API_KEY ? "Available" : "Not available",
+  // });
+  // console.log("🔍 Debugging env in planner.ts:");
+  // console.log("  env.MOCK_PLANNER actual value:", env.MOCK_PLANNER);
+  // console.log("  env.OPENAI_API_KEY actual value:", env.OPENAI_API_KEY);
+  // console.log("  Is env.OPENAI_API_KEY truthy?:", !!env.OPENAI_API_KEY);
+  // console.log(
+  //   "  Condition for mock (env.MOCK_PLANNER === '1'):",
+  //   env.MOCK_PLANNER === "1"
+  // );
+  // console.log(
+  //   "  Condition for mock (!env.OPENAI_API_KEY):",
+  //   !env.OPENAI_API_KEY
+  // );
+  // console.log(
+  //   "  Combined condition for mock (mock enabled || key missing):",
+  //   env.MOCK_PLANNER === "1" || !env.OPENAI_API_KEY
+  // );
 
   // Emit planning start event
   await systemEvents.emit(
@@ -310,7 +325,7 @@ export async function callPlannerLLM(
     // Use AI SDK's generateObject with structured outputs
     const { object: uiSpec } = await generateObject({
       model: strictOpenAI("gpt-4o", { structuredOutputs: true }),
-      schema: uiSpecNode,
+      schema: openAIUISpec,
       messages: [{ role: "user", content: prompt }],
       temperature: 0.2,
       maxTokens: 4000,

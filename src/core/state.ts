@@ -1,41 +1,16 @@
-import { useReducer, useCallback, useEffect, useState } from "react";
+import { useReducer, useCallback, useEffect } from "react";
 // Mock useChat hook for development
-const useChat = (config: any) => {
-  const [content, setContent] = useState("{}");
-  const [isLoading, setIsLoading] = useState(false);
-  const [chatError, setError] = useState<Error | null>(null);
-
-  const append = async (message: any) => {
-    try {
-      setIsLoading(true);
-      // In the mock, we just return immediately with empty content
-      // This prevents any infinite loops from chat API calls
-      setContent("{}");
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)));
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  return {
-    append,
-    data: { content },
-    isLoading,
-    error: chatError,
-    stop: () => {},
-  };
-};
+// const useChat = (config: any) => { ... };
 
 import {
   UIState,
   UIEvent,
   UISpecNode,
-  uiSpecNode,
+  // uiSpecNode, // Will be handled by planner.ts, not directly by state.ts for parsing
   PlannerInput,
 } from "../schema/ui";
 import { uiReducer, initialState } from "./reducer";
-import { buildPrompt, mockPlanner } from "./planner";
+import { buildPrompt, mockPlanner, callPlannerLLM } from "./planner"; // Added callPlannerLLM
 import {
   systemEvents,
   createSystemEvent,
@@ -50,9 +25,9 @@ export interface UseUIStateEngineOptions {
   mockMode?: boolean | undefined;
   planningConfig?:
     | {
-        prefetchDepth?: number | undefined;
-        temperature?: number | undefined;
-        streaming?: boolean | undefined;
+        prefetchDepth?: number;
+        temperature?: number;
+        streaming?: boolean;
       }
     | undefined;
   router?: ActionRouter | undefined;
@@ -70,7 +45,7 @@ export function useUIStateEngine({
   goal,
   userContext,
   mockMode = false,
-  planningConfig = {},
+  planningConfig,
   router = createDefaultRouter(),
   dataContext = {},
   enablePartialUpdates = false,
@@ -85,255 +60,178 @@ export function useUIStateEngine({
   }
 
   const [state, dispatch] = useReducer(uiReducer, initialState);
-  const { append, data, isLoading, error, stop } = useChat(null);
+  // const { append, data, isLoading, error, stop } = useChat(null); // REMOVE useChat
 
   // Function to handle UI events with routing
   const handleEvent = useCallback(
-    (event: UIEvent) => {
-      // Dispatch the UI event
+    async (event: UIEvent) => {
+      // Make async
       dispatch({ type: "UI_EVENT", event });
+      dispatch({ type: "LOADING", isLoading: true });
 
-      // Stop any ongoing chat streams
-      stop();
+      try {
+        let resolvedNode: UISpecNode;
+        let actionTypeForDispatch: ActionType = ActionType.FULL_REFRESH; // Default
+        let targetNodeIdForDispatch: string = "root"; // Default
 
-      // Use the router to determine how to handle this event
-      if (enablePartialUpdates) {
-        const route = router.resolveRoute(
-          event,
-          schema,
-          state.layout,
-          dataContext,
-          goal,
-          userContext
-        );
-
-        if (route) {
-          console.log("Resolved route:", route);
-
-          // Emit routing event
-          systemEvents.emit(
-            createSystemEvent(SystemEventType.PLAN_START, {
-              plannerInput: route.plannerInput,
-            })
+        if (enablePartialUpdates) {
+          const route = router.resolveRoute(
+            event,
+            schema,
+            state.layout,
+            dataContext,
+            goal,
+            userContext
           );
 
-          if (mockMode) {
-            // Use mock planner with routing info
-            const node = mockPlanner(
-              route.plannerInput,
-              route.targetNodeId,
-              route.prompt
-            );
-            // Dispatch based on action type
-            switch (route.actionType) {
-              case ActionType.FULL_REFRESH:
-                dispatch({ type: "AI_RESPONSE", node });
-                break;
-
-              case ActionType.UPDATE_NODE:
-              case ActionType.SHOW_DETAIL:
-              case ActionType.HIDE_DETAIL:
-              case ActionType.TOGGLE_STATE:
-              case ActionType.ADD_DROPDOWN:
-              case ActionType.UPDATE_FORM:
-              case ActionType.NAVIGATE:
-                dispatch({
-                  type: "PARTIAL_UPDATE",
-                  nodeId: route.targetNodeId,
-                  node,
-                });
-                break;
-            }
-          } else {
-            // Send prompt to LLM
-            const prompt = route.prompt;
+          if (route) {
+            console.log("Resolved route:", route);
+            actionTypeForDispatch = route.actionType;
+            targetNodeIdForDispatch = route.targetNodeId;
 
             systemEvents.emit(
-              createSystemEvent(SystemEventType.PLAN_PROMPT_CREATED, { prompt })
-            );
-
-            append({
-              content: prompt,
-              role: "user",
-            });
-
-            // The response will be handled in the useEffect below
-            // We'll need to store the current route info for when the response comes back
-            sessionStorage.setItem(
-              "currentRoute",
-              JSON.stringify({
-                actionType: route.actionType,
-                targetNodeId: route.targetNodeId,
+              createSystemEvent(SystemEventType.PLAN_START, {
+                plannerInput: route.plannerInput,
               })
             );
+
+            if (mockMode) {
+              resolvedNode = mockPlanner(
+                route.plannerInput,
+                route.targetNodeId,
+                route.prompt
+              );
+            } else {
+              // systemEvents.emit for PLAN_PROMPT_CREATED is handled inside callPlannerLLM
+              resolvedNode = await callPlannerLLM(route.plannerInput, route);
+            }
+          } else {
+            // Fallback if router.resolveRoute returns null (should not happen with default full refresh)
+            const input: PlannerInput = {
+              schema,
+              goal,
+              history: [...state.history, event],
+              userContext,
+            };
+            if (mockMode) {
+              resolvedNode = mockPlanner(input);
+            } else {
+              resolvedNode = await callPlannerLLM(input);
+            }
           }
+        } else {
+          // Fallback to full refresh if partial updates disabled
+          const input: PlannerInput = {
+            schema,
+            goal,
+            history: [...state.history, event], // event is already in history from UI_EVENT dispatch
+            userContext: userContext,
+          };
 
-          return;
+          if (mockMode) {
+            resolvedNode = mockPlanner(input);
+          } else {
+            // buildPrompt is handled inside callPlannerLLM if no route.prompt is provided
+            resolvedNode = await callPlannerLLM(input);
+          }
         }
-      }
 
-      // Fallback to full refresh if no route or partial updates disabled
-      const input: PlannerInput = {
-        schema,
-        goal,
-        history: [...state.history, event],
-        userContext: userContext,
-      };
-
-      if (mockMode) {
-        // Use mock planner for faster development
-        const node = mockPlanner(input);
-        dispatch({ type: "AI_RESPONSE", node });
-      } else {
-        // Send prompt to LLM
-        const prompt = buildPrompt(input);
-        append({
-          content: prompt,
-          role: "user",
-        });
+        // Dispatch based on action type (derived from routing or default)
+        switch (actionTypeForDispatch) {
+          case ActionType.UPDATE_NODE:
+          case ActionType.SHOW_DETAIL:
+          case ActionType.HIDE_DETAIL:
+          case ActionType.TOGGLE_STATE:
+          case ActionType.ADD_DROPDOWN:
+          case ActionType.UPDATE_FORM:
+          case ActionType.NAVIGATE:
+            dispatch({
+              type: "PARTIAL_UPDATE",
+              nodeId: targetNodeIdForDispatch,
+              node: resolvedNode,
+            });
+            break;
+          case ActionType.FULL_REFRESH:
+          default:
+            dispatch({ type: "AI_RESPONSE", node: resolvedNode });
+            break;
+        }
+        // systemEvents.emit for PLAN_COMPLETE is handled by callPlannerLLM or should be added for mockPlanner path
+      } catch (e) {
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        dispatch({ type: "ERROR", message: errorMessage });
+        systemEvents.emit(
+          createSystemEvent(SystemEventType.PLAN_ERROR, {
+            error: e instanceof Error ? e : new Error(String(e)),
+          })
+        );
+      } finally {
+        dispatch({ type: "LOADING", isLoading: false });
       }
     },
     [
-      append,
+      // append, // REMOVE
       goal,
       schema,
-      state.history,
+      state.history, // Keep state.history if input preparation needs it
       state.layout,
-      stop,
+      // stop, // REMOVE
       userContext,
       router,
       mockMode,
       dataContext,
       enablePartialUpdates,
+      dispatch, // Add dispatch
     ]
   );
 
-  // Effect to process LLM responses
-  useEffect(() => {
-    if (isLoading) {
-      dispatch({ type: "LOADING", isLoading: true });
-    } else if (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      dispatch({ type: "ERROR", message: errorMessage });
-
-      // Emit error event
-      systemEvents.emit(
-        createSystemEvent(SystemEventType.PLAN_ERROR, {
-          error: error instanceof Error ? error : new Error(String(error)),
-        })
-      );
-    } else if (data.content && data.content !== "{}") {
-      try {
-        // Emit response chunk event
-        systemEvents.emit(
-          createSystemEvent(SystemEventType.PLAN_RESPONSE_CHUNK, {
-            chunk: data.content,
-            isComplete: true,
-          })
-        );
-
-        // Extract JSON from the response (handling potential markdown code blocks)
-        const jsonMatch = data.content.match(
-          /```(?:json)?\s*([\s\S]*?)\s*```/
-        ) || [null, data.content];
-        const jsonStr = jsonMatch[1].trim();
-
-        const parsedJson = JSON.parse(jsonStr);
-        // Validate the response using Zod
-        const validatedNode = uiSpecNode.parse(parsedJson);
-
-        // Check for stored route info
-        const routeInfoStr = sessionStorage.getItem("currentRoute");
-        if (routeInfoStr && enablePartialUpdates) {
-          try {
-            const routeInfo = JSON.parse(routeInfoStr);
-
-            // Handle response based on action type
-            switch (routeInfo.actionType) {
-              case ActionType.FULL_REFRESH:
-                dispatch({ type: "AI_RESPONSE", node: validatedNode });
-                break;
-
-              case ActionType.UPDATE_NODE:
-              case ActionType.SHOW_DETAIL:
-              case ActionType.HIDE_DETAIL:
-              case ActionType.TOGGLE_STATE:
-              case ActionType.ADD_DROPDOWN:
-              case ActionType.UPDATE_FORM:
-              case ActionType.NAVIGATE:
-                dispatch({
-                  type: "PARTIAL_UPDATE",
-                  nodeId: routeInfo.targetNodeId,
-                  node: validatedNode,
-                });
-                break;
-
-              default:
-                dispatch({ type: "AI_RESPONSE", node: validatedNode });
-            }
-
-            // Clear stored route info
-            sessionStorage.removeItem("currentRoute");
-          } catch (e) {
-            // Fallback to full response if route info is invalid
-            console.error("Error parsing route info:", e);
-            dispatch({ type: "AI_RESPONSE", node: validatedNode });
-          }
-        } else {
-          // Default handling - full response
-          dispatch({ type: "AI_RESPONSE", node: validatedNode });
-        }
-
-        // Emit planning complete event
-        systemEvents.emit(
-          createSystemEvent(SystemEventType.PLAN_COMPLETE, {
-            layout: validatedNode,
-            executionTimeMs: 0, // Not available here
-          })
-        );
-      } catch (parseError) {
-        console.error("Failed to parse LLM response:", parseError);
-        dispatch({
-          type: "ERROR",
-          message: "Failed to parse LLM response",
-        });
-
-        // Emit error event
-        systemEvents.emit(
-          createSystemEvent(SystemEventType.PLAN_ERROR, {
-            error:
-              parseError instanceof Error
-                ? parseError
-                : new Error("Parse error"),
-          })
-        );
-      }
-    }
-  }, [data.content, error, isLoading, enablePartialUpdates]);
+  // Effect to process LLM responses - REMOVE THIS ENTIRE useEffect
+  // useEffect(() => { ... }, [data.content, error, isLoading, enablePartialUpdates]);
 
   // Initial query on mount
   useEffect(() => {
-    const input: PlannerInput = {
-      schema,
-      goal,
-      history: [],
-      userContext: userContext,
+    const initialFetch = async () => {
+      /**
+       console.log( // <--- ADD THIS LOG
+        "🚀 useUIStateEngine initial load EFFECT TRIGGERED. Goal:", goal,
+        "MockMode:", mockMode,
+        "Schema changed:", schema !== (window as any)._previousSchema, // Crude check
+        "UserContext changed:", userContext !== (window as any)._previousUserContext // Crude check
+      );
+       */
+      dispatch({ type: "LOADING", isLoading: true });
+      try {
+        const input: PlannerInput = {
+          schema,
+          goal,
+          history: [],
+          userContext: userContext,
+        };
+        let node: UISpecNode;
+        if (mockMode) {
+          node = mockPlanner(input);
+          // TODO: Consider emitting PLAN_COMPLETE for mock path if callPlannerLLM does it internally
+        } else {
+          // callPlannerLLM will emit PLAN_START, PLAN_PROMPT_CREATED, PLAN_COMPLETE/ERROR
+          node = await callPlannerLLM(input);
+        }
+        dispatch({ type: "AI_RESPONSE", node });
+      } catch (e) {
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        dispatch({ type: "ERROR", message: errorMessage });
+        systemEvents.emit(
+          // Also emit system event for initial load error
+          createSystemEvent(SystemEventType.PLAN_ERROR, {
+            error: e instanceof Error ? e : new Error(String(e)),
+          })
+        );
+      } finally {
+        dispatch({ type: "LOADING", isLoading: false });
+      }
     };
-
-    if (mockMode) {
-      // Use mock planner for faster development
-      const node = mockPlanner(input);
-      dispatch({ type: "AI_RESPONSE", node });
-    } else {
-      // Send prompt to LLM
-      const prompt = buildPrompt(input);
-      append({
-        content: prompt,
-        role: "user",
-      });
-    }
-  }, [append, goal, schema, userContext, mockMode]);
+    initialFetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goal, schema, userContext, mockMode, dispatch]); // Removed append, kept dispatch
 
   return {
     state,

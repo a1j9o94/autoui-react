@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
-import { UIEvent, UISpecNode, UIEventType } from "./schema/ui";
+import { UIEvent, UISpecNode, UIEventType, DataItem } from "./schema/ui";
 import { useUIStateEngine } from "./core/state";
 import { renderNode, renderShimmer } from "./core/renderer";
 import { resolveBindings, DataContext, executeAction } from "./core/bindings";
@@ -130,15 +130,13 @@ export const AutoUI: React.FC<AutoUIProps> = ({
   systemEventHooks,
   debugMode = false,
   mockMode = true,
-  databaseConfig,
   planningConfig,
   integration = {},
   scope = {},
   enablePartialUpdates = false,
 }) => {
   // Initialize schema adapter if provided
-  const [schemaAdapterInstance, setSchemaAdapterInstance] =
-    useState<SchemaAdapter | null>(null);
+  const [schemaAdapterInstance] = useState<SchemaAdapter | null>(null);
   const [dataContext, setDataContext] = useState<DataContext>({});
   // Check if required components are available
   const [componentsAvailable, setComponentsAvailable] = useState(true);
@@ -215,7 +213,8 @@ export const AutoUI: React.FC<AutoUIProps> = ({
           initialData[key] = {
             schema: tableSchema,
             // For development, add sample data if available
-            data: (tableSchema as any)?.sampleData || [],
+            data:
+              (tableSchema as { sampleData?: DataItem[] })?.sampleData || [],
             selected: null,
           };
         });
@@ -394,7 +393,8 @@ export const AutoUI: React.FC<AutoUIProps> = ({
       try {
         const rendered = await renderNode(
           resolvedLayout,
-          componentAdapter as "shadcn"
+          componentAdapter as "shadcn",
+          processEvent
         );
         setRenderedNode(rendered);
       } catch (err) {
@@ -403,7 +403,7 @@ export const AutoUI: React.FC<AutoUIProps> = ({
     } else {
       setRenderedNode(null);
     }
-  }, [resolvedLayout, componentAdapter]);
+  }, [resolvedLayout, componentAdapter, processEvent]);
 
   // Call the stable render function in the effect
   useEffect(() => {

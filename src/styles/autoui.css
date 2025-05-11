@@ -65,4 +65,20 @@
 
 .autoui-error-message {
   font-size: 0.875rem;
+}
+
+/* Style for the mock Container component in shadcn.tsx */
+.autoui-mock-container {
+  color: inherit;
+  width: 100%;
+  /* text-gray-800 */
+  color: #1f2937; 
+}
+
+/* Dark mode styling for the mock Container */
+@media (prefers-color-scheme: dark) {
+  .autoui-mock-container {
+    /* dark:text-gray-100 */
+    color: #f3f4f6;
+  }
 } 

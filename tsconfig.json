@@ -21,7 +21,8 @@
     "outDir": "dist",
     "noImplicitAny": true,
     "exactOptionalPropertyTypes": true,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "types": ["vitest/globals", "@testing-library/jest-dom"]
   },
   "include": ["src", "example/ai-sdk-example.ts", "example/AIGeneratedUI.tsx", "example/basic-usage.ts"],
   "exclude": ["node_modules", "dist", "example"]

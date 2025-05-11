@@ -158,14 +158,19 @@ export class ActionRouter {
     };
 
     // Process prompt template
-    const prompt = this.processTemplate(matchingRoute.promptTemplate, {
+    const templateValues = {
       goal,
       eventType: event.type,
       nodeId: event.nodeId,
       targetNodeId,
       actionType: matchingRoute.actionType,
-      ...additionalContext,
-    });
+      ...(userContext || {}), // Spread the original userContext (passed to resolveRoute)
+      ...additionalContext, // Spread additionalContext afterwards (can override userContext keys)
+    };
+    const prompt = this.processTemplate(
+      matchingRoute.promptTemplate,
+      templateValues
+    );
 
     return {
       actionType: matchingRoute.actionType,
