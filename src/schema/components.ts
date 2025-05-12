@@ -142,4 +142,5 @@ export const shadcnComponents = [
   "textarea",
   "checkbox",
   "radio-group",
+  "container",
 ];

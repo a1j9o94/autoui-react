@@ -3,14 +3,13 @@ import { useReducer, useCallback, useEffect } from "react";
 // const useChat = (config: any) => { ... };
 
 import {
-  UIState,
   UIEvent,
   UISpecNode,
   // uiSpecNode, // Will be handled by planner.ts, not directly by state.ts for parsing
   PlannerInput,
 } from "../schema/ui";
 import { uiReducer, initialState } from "./reducer";
-import { buildPrompt, mockPlanner, callPlannerLLM } from "./planner"; // Added callPlannerLLM
+import { mockPlanner, callPlannerLLM } from "./planner"; // Added callPlannerLLM
 import {
   systemEvents,
   createSystemEvent,
@@ -107,8 +106,8 @@ export function useUIStateEngine({
               // systemEvents.emit for PLAN_PROMPT_CREATED is handled inside callPlannerLLM
               resolvedNode = await callPlannerLLM(
                 route.plannerInput,
-                route,
-                openaiApiKey
+                openaiApiKey || "",
+                route
               );
             }
           } else {
@@ -122,7 +121,11 @@ export function useUIStateEngine({
             if (mockMode) {
               resolvedNode = mockPlanner(input);
             } else {
-              resolvedNode = await callPlannerLLM(input, undefined, openaiApiKey);
+              resolvedNode = await callPlannerLLM(
+                input,
+                openaiApiKey || "",
+                undefined
+              );
             }
           }
         } else {
@@ -138,7 +141,11 @@ export function useUIStateEngine({
             resolvedNode = mockPlanner(input);
           } else {
             // buildPrompt is handled inside callPlannerLLM if no route.prompt is provided
-            resolvedNode = await callPlannerLLM(input, undefined, openaiApiKey);
+            resolvedNode = await callPlannerLLM(
+              input,
+              openaiApiKey || "",
+              undefined
+            );
           }
         }
 
@@ -198,29 +205,60 @@ export function useUIStateEngine({
   // Initial query on mount
   useEffect(() => {
     const initialFetch = async () => {
-      /**
-       console.log( // <--- ADD THIS LOG
-        "🚀 useUIStateEngine initial load EFFECT TRIGGERED. Goal:", goal,
-        "MockMode:", mockMode,
-        "Schema changed:", schema !== (window as any)._previousSchema, // Crude check
-        "UserContext changed:", userContext !== (window as any)._previousUserContext // Crude check
-      );
-       */
       dispatch({ type: "LOADING", isLoading: true });
       try {
         const input: PlannerInput = {
           schema,
           goal,
-          history: [],
+          history: [], // Initial history is empty
           userContext: userContext,
         };
         let node: UISpecNode;
+
         if (mockMode) {
+          // For mock mode, we can still use the simpler mockPlanner directly
+          // or simulate routing if necessary, but for now, let's keep it simple.
           node = mockPlanner(input);
-          // TODO: Consider emitting PLAN_COMPLETE for mock path if callPlannerLLM does it internally
+          // Consider emitting PLAN_COMPLETE for mock path if needed
         } else {
-          // callPlannerLLM will emit PLAN_START, PLAN_PROMPT_CREATED, PLAN_COMPLETE/ERROR
-          node = await callPlannerLLM(input, undefined, openaiApiKey);
+          // For non-mock mode, we MUST go through the router to get a prompt
+          const initEvent: UIEvent = {
+            type: "INIT", // Assuming "INIT" is your initial event type
+            nodeId: "system", // Or some other appropriate initial nodeId
+            timestamp: Date.now(),
+            payload: null,
+          };
+
+          // Resolve the route for the initial event
+          const route = router.resolveRoute(
+            initEvent,
+            schema,
+            null, // No existing layout on initial fetch
+            dataContext,
+            goal,
+            userContext
+          );
+
+          if (!route || !route.prompt) {
+            // This should ideally not happen if default routes are set up
+            console.error(
+              "[UIStateEngine] Initial fetch: Failed to resolve route or get prompt for INIT event."
+            );
+            throw new Error("Failed to initialize UI due to routing error.");
+          }
+
+          systemEvents.emit(
+            createSystemEvent(SystemEventType.PLAN_START, {
+              plannerInput: route.plannerInput,
+            })
+          );
+
+          // Call planner with the resolved route (which includes the prompt)
+          node = await callPlannerLLM(
+            route.plannerInput, // Use plannerInput from the resolved route
+            openaiApiKey || "",
+            route // Pass the entire route object
+          );
         }
         dispatch({ type: "AI_RESPONSE", node });
       } catch (e) {

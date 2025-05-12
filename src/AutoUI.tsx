@@ -16,13 +16,51 @@ import {
 } from "./core/component-detection";
 import "./styles/autoui.css";
 
+// Helper function to correct list bindings
+function correctListBindingsRecursive(node: UISpecNode, dataContext: DataContext): UISpecNode {
+  // Deep clone to avoid mutating the original state.layout directly during correction
+  // This is important because state.layout might be used elsewhere or in dependencies.
+  const correctedNode = JSON.parse(JSON.stringify(node)) as UISpecNode;
+
+  if ((correctedNode.node_type === "ListView" || correctedNode.node_type === "Table") && correctedNode.bindings?.data) {
+    const bindingPath = correctedNode.bindings.data;
+    if (typeof bindingPath === 'string') {
+      const pathSegments = bindingPath.split('.');
+      const mainKey = pathSegments[0]; // e.g., 'tasks'
+
+      // Check if the binding path is just the main key (e.g., "tasks")
+      // and if a .data sub-property exists and is an array in the context.
+      if (pathSegments.length === 1) {
+        const potentialDataContextEntry = dataContext[mainKey];
+        if (
+          potentialDataContextEntry &&
+          typeof potentialDataContextEntry === 'object' &&
+          potentialDataContextEntry !== null &&
+          'data' in potentialDataContextEntry &&
+          Array.isArray((potentialDataContextEntry as { data: unknown }).data)
+        ) {
+          correctedNode.bindings.data = `${mainKey}.data`;
+          console.log(`[AutoUI Debug] Corrected list binding for node '${correctedNode.id}': from '${mainKey}' to '${mainKey}.data'`);
+        }
+      }
+    }
+  }
+
+  if (correctedNode.children) {
+    correctedNode.children = correctedNode.children.map(child => correctListBindingsRecursive(child, dataContext));
+  }
+
+  return correctedNode;
+}
+
 // Interface for DrizzleAdapterOptions
 interface DrizzleAdapterOptions {
   schema: Record<string, unknown>;
   // Add other options as needed
 }
 
-export interface AutoUIProps extends Omit<UseUIStateEngineOptions, 'router' | 'dataContext'> {
+export interface AutoUIProps
+  extends Omit<UseUIStateEngineOptions, "router" | "dataContext"> {
   // Extend options from the state engine, excluding ones managed internally
   // Schema definition (one of these is required)
   schema:
@@ -101,6 +139,9 @@ export interface AutoUIProps extends Omit<UseUIStateEngineOptions, 'router' | 'd
     // Whether to use streaming (otherwise wait for complete response)
     streaming?: boolean;
   };
+
+  // Add the openaiApiKey prop here
+  openaiApiKey?: string;
 }
 
 /**
@@ -135,6 +176,7 @@ export const AutoUI: React.FC<AutoUIProps> = ({
   integration = {},
   scope = {},
   enablePartialUpdates = false,
+  openaiApiKey,
 }) => {
   // Initialize schema adapter if provided
   const [schemaAdapterInstance] = useState<SchemaAdapter | null>(null);
@@ -242,6 +284,7 @@ export const AutoUI: React.FC<AutoUIProps> = ({
     router: undefined,
     dataContext,
     enablePartialUpdates,
+    openaiApiKey,
   });
 
   // Create event manager
@@ -371,13 +414,30 @@ export const AutoUI: React.FC<AutoUIProps> = ({
   // Update the resolved layout whenever state.layout or dataContext changes
   // Create a stable function to avoid constantly re-running the effect
   const resolveLayoutBindings = useCallback(async () => {
-    if (state.layout) {
-      try {
-        const resolved = await resolveBindings(state.layout, dataContext);
-        setResolvedLayout(resolved);
-      } catch (err) {
-        console.error("Error resolving bindings:", err);
-      }
+    if (state.layout && dataContext) {
+      // Existing logs
+      console.log(
+        "[AutoUI Debug] DataContext before resolving bindings:",
+        JSON.stringify(dataContext, null, 2)
+      );
+      console.log(
+        "[AutoUI Debug] Raw layout before resolving (from planner):",
+        JSON.stringify(state.layout, null, 2)
+      );
+
+      // Correct list bindings before attempting to resolve them
+      const correctedLayout = correctListBindingsRecursive(state.layout, dataContext);
+      console.log(
+        "[AutoUI Debug] Layout after binding correction (before resolving):",
+        JSON.stringify(correctedLayout, null, 2)
+      );
+
+      const resolved = await resolveBindings(correctedLayout, dataContext);
+      setResolvedLayout(resolved);
+      console.log(
+        "[AutoUI Debug] Resolved layout after bindings:",
+        JSON.stringify(resolved, null, 2)
+      );
     } else {
       setResolvedLayout(undefined);
     }

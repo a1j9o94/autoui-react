@@ -19,83 +19,6 @@ const getOpenAIClient = (apiKey: string) => {
 };
 
 /**
- * Builds the prompt for the LLM planner
- * @param input - Planner input including schema, goal, and history
- * @param targetNodeId - Optional target node ID for partial updates
- * @param customPrompt - Optional custom prompt
- * @returns Formatted prompt string
- */
-export function buildPrompt(
-  input: PlannerInput,
-  customPrompt?: string
-): string {
-  const { schema, goal, history, userContext } = input;
-
-  // Extract schema information without actual data rows
-  const schemaInfo = Object.entries(schema)
-    .map(([tableName, tableSchema]) => {
-      return `Table: ${tableName}\nSchema: ${JSON.stringify(tableSchema)}`;
-    })
-    .join("\n\n");
-
-  // Format recent events for context
-  const recentEvents =
-    history
-      ?.slice(-5)
-      .map(
-        (event) =>
-          `Event: ${event.type} on node ${event.nodeId}${
-            event.payload
-              ? ` with payload ${JSON.stringify(event.payload)}`
-              : ""
-          }`
-      )
-      .join("\n") || "No recent events";
-
-  // Build user context section if provided
-  const userContextSection = userContext
-    ? `\n\nUser Context:\n${JSON.stringify(userContext)}`
-    : "";
-
-  // Use custom prompt if provided, otherwise use the default
-  if (customPrompt) {
-    return customPrompt;
-  }
-
-  // Assemble the full prompt
-  return `
-You are an expert UI generator. 
-Create a user interface that achieves the following goal: "${goal}"
-
-Available data schema:
-${schemaInfo}
-
-Recent user interactions:
-${recentEvents}${userContextSection}
-
-Generate a complete UI specification in JSON format that matches the following TypeScript type:
-type UISpecNode = {
-  id: string;
-  node_type: string;
-  props?: Record<string, unknown>;
-  bindings?: Record<string, unknown>;
-  events?: Record<string, { action: string; target: string; payload?: Record<string, unknown>; }>;
-  children?: UISpecNode[];
-};
-
-UI Guidance:
-1. Create a focused interface that directly addresses the goal
-2. Use appropriate UI patterns (lists, forms, details, etc.)
-3. Include navigation between related views when needed
-4. Keep the interface simple and intuitive
-5. Bind to schema data where appropriate
-6. Provide event handlers for user interactions - make sure to always include both action and target properties
-
-Respond ONLY with the JSON UI specification and no other text.
-  `;
-}
-
-/**
  * Mock planner for development and testing
  * @param input - Planner input
  * @param targetNodeId - Optional target node ID for partial updates
@@ -214,7 +137,7 @@ export function mockPlanner(
                   selectable: "true",
                 },
                 bindings: {
-                  items: JSON.stringify(taskData),
+                  data: "tasks.data",
                   fields: JSON.stringify([
                     { key: "id", label: "ID" },
                     { key: "title", label: "Title" },
@@ -278,31 +201,9 @@ export function mockPlanner(
  */
 export async function callPlannerLLM(
   input: PlannerInput,
-  routeResolution?: RouteResolution,
-  openaiApiKey?: string
+  openaiApiKey: string,
+  routeResolution?: RouteResolution
 ): Promise<UISpecNode> {
-  console.log("🚀 callPlannerLLM called with input:", input);
-  console.log("🚀 Environment variables:", {
-    MOCK_PLANNER: env.MOCK_PLANNER,
-    OPENAI_API_KEY: env.OPENAI_API_KEY ? "Available" : "Not available",
-    passedApiKey: openaiApiKey ? "Available" : "Not available",
-  });
-  console.log("🔍 Debugging env in planner.ts:");
-  console.log("  env.MOCK_PLANNER actual value:", env.MOCK_PLANNER);
-  console.log("  env.OPENAI_API_KEY actual value:", env.OPENAI_API_KEY);
-  console.log(
-    "  Condition for mock (env.MOCK_PLANNER === '1'):",
-    env.MOCK_PLANNER === "1"
-  );
-  console.log(
-    "  Condition for mock (!env.OPENAI_API_KEY):",
-    !(openaiApiKey || env.OPENAI_API_KEY)
-  );
-  console.log(
-    "  Combined condition for mock (mock enabled || key missing):",
-    env.MOCK_PLANNER === "1" || !(openaiApiKey || env.OPENAI_API_KEY)
-  );
-
   await systemEvents.emit(
     createSystemEvent(SystemEventType.PLAN_START, { plannerInput: input })
   );
@@ -325,8 +226,11 @@ export async function callPlannerLLM(
 
   const startTime = Date.now();
 
-  // Use route resolution prompt if available, otherwise build a default prompt
-  const prompt = routeResolution?.prompt || buildPrompt(input);
+  // Use prompt from route resolution (must be provided by action-router)
+  const prompt = routeResolution?.prompt;
+  if (!prompt) {
+    throw new Error("ActionRouter did not provide a prompt to callPlannerLLM.");
+  }
 
   // Emit prompt created event
   await systemEvents.emit(
@@ -336,7 +240,9 @@ export async function callPlannerLLM(
   try {
     // Use AI SDK's generateObject with structured outputs
     const { object: uiSpec } = await generateObject({
-      model: getOpenAIClient(openaiApiKey)("gpt-4o", { structuredOutputs: true }),
+      model: getOpenAIClient(openaiApiKey)("gpt-4o", {
+        structuredOutputs: true,
+      }),
       schema: openAIUISpec,
       messages: [{ role: "user", content: prompt }],
       temperature: 0.2,
@@ -421,8 +327,8 @@ export async function processEvent(
   const plannerInputForLLM: PlannerInput = routeResolution.plannerInput;
   const newLayout = await callPlannerLLM(
     plannerInputForLLM,
-    routeResolution,
-    openaiApiKey
+    openaiApiKey || "",
+    routeResolution
   );
 
   // Temporarily comment out SystemEvent calls

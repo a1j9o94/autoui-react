@@ -19,6 +19,18 @@ import { SystemEventType, AnySystemEvent } from "./system-events";
 // Hold the current dispatch spy for each test
 let currentTestDispatchSpy: Mock<[UIAction], void> | null = null;
 
+let mockResolveRoute: Mock<
+  [
+    UIEvent,
+    Record<string, unknown>,
+    UISpecNode | null,
+    Record<string, unknown>,
+    string,
+    Record<string, unknown> | undefined
+  ],
+  RouteResolution | null
+>;
+
 // Mock React's useReducer
 vi.mock("react", async (importOriginal) => {
   const actualReact = await importOriginal<typeof ReactSource>();
@@ -46,30 +58,46 @@ vi.mock("react", async (importOriginal) => {
   };
 });
 
-// Declare mocks here, assign in beforeEach
-let mockMockPlanner: Mock<
-  [PlannerInput, (string | undefined)?, (string | undefined)?],
-  UISpecNode
->;
-let mockCallPlannerLLM: Mock<
-  [PlannerInput, (RouteResolution | undefined)?],
-  Promise<UISpecNode>
->;
-let mockResolveRoute: Mock<
-  [
-    UIEvent,
-    Record<string, unknown>,
-    UISpecNode | null,
-    Record<string, unknown>,
-    string,
-    Record<string, unknown> | undefined
-  ],
-  RouteResolution | null
->;
-let mockBuildPrompt: Mock<
-  [PlannerInput, (string | undefined)?, (string | undefined)?],
-  string
->;
+// Mock planner module with correct signature for callPlannerLLM
+vi.mock("./planner", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./planner")>();
+  return {
+    ...actual,
+    // Provide a mock implementation matching the new signature
+    callPlannerLLM: vi
+      .fn()
+      .mockImplementation(
+        async (
+          _input: PlannerInput,
+          _apiKey?: string,
+          _routeResolution?: RouteResolution
+        ) => ({
+          id: "mock-llm-response-root",
+          node_type: "Container",
+          props: null,
+          children: [],
+          bindings: null,
+          events: null,
+        })
+      ),
+    mockPlanner: vi
+      .fn()
+      .mockImplementation(
+        (input: PlannerInput, targetNodeId?: string, _prompt?: string) => ({
+          id: targetNodeId || input.goal || "mock-root", // Keep existing mockPlanner mock logic
+          node_type: "Container",
+          props: null,
+          children: [],
+          bindings: null,
+          events: null,
+        })
+      ),
+    buildPrompt: vi.fn(),
+    processEvent: vi.fn(),
+  };
+});
+
+// Mock the system events
 let mockSystemEventsEmit: Mock<[AnySystemEvent], Promise<void>>;
 let mockCreateSystemEvent: Mock<[SystemEventType, any], AnySystemEvent>;
 
@@ -81,6 +109,17 @@ const mockPlannerResultNode: UISpecNode = {
   bindings: null,
   events: null,
 };
+
+// Import the mocked functions for type safety
+import { callPlannerLLM, mockPlanner } from "./planner";
+const mockCallPlannerLLM = callPlannerLLM as Mock<
+  [PlannerInput, string?, RouteResolution?],
+  Promise<UISpecNode>
+>;
+const mockMockPlanner = mockPlanner as Mock<
+  [PlannerInput, string?, string?],
+  UISpecNode
+>;
 
 describe("useUIStateEngine", () => {
   const defaultOptions: UseUIStateEngineOptions = {
@@ -100,29 +139,9 @@ describe("useUIStateEngine", () => {
 
   beforeEach(() => {
     vi.clearAllMocks(); // Clears call history from all mocks, including any previous currentTestDispatchSpy
-    currentTestDispatchSpy = null; // Ensure it's reset before renderHelper sets it
+    currentTestDispatchSpy = null; // Reset spy tracker
 
     // Assign mocks here
-    mockBuildPrompt = vi
-      .spyOn(Planner, "buildPrompt")
-      .mockReturnValue("test-prompt") as any;
-    mockMockPlanner = vi
-      .spyOn(Planner, "mockPlanner")
-      .mockImplementation(
-        (input: PlannerInput, targetNodeId?: string, prompt?: string) => ({
-          ...mockPlannerResultNode,
-          id: targetNodeId || input.goal || "mock-root",
-        })
-      ) as any;
-    mockCallPlannerLLM = vi
-      .spyOn(Planner, "callPlannerLLM")
-      .mockImplementation(
-        async (input: PlannerInput, routeResolution?: RouteResolution) => ({
-          ...mockPlannerResultNode,
-          id: "llm-root-default",
-        })
-      ) as any;
-
     mockSystemEventsEmit = vi
       .spyOn(SystemEvents.systemEvents, "emit")
       .mockResolvedValue(undefined) as Mock<[AnySystemEvent], Promise<void>>;
@@ -132,7 +151,7 @@ describe("useUIStateEngine", () => {
         (type: SystemEventType, payload: any) =>
           ({ type, payload, timestamp: Date.now() } as any)
       ) as Mock<[SystemEventType, any], AnySystemEvent>;
-    mockResolveRoute = vi.fn(); // mockResolveRoute is part of the object returned by createDefaultRouter
+    mockResolveRoute = vi.fn();
     vi.spyOn(ActionRouter, "createDefaultRouter").mockReturnValue({
       resolveRoute: mockResolveRoute,
     } as any);
@@ -167,6 +186,36 @@ describe("useUIStateEngine", () => {
         id: "llm-initial-success",
       };
       mockCallPlannerLLM.mockImplementation(async () => specificNode);
+
+      // Mock what resolveRoute should return for the INIT event
+      const initialRouteResolution: RouteResolution = {
+        actionType: ActionType.FULL_REFRESH,
+        targetNodeId: "root",
+        plannerInput: {
+          goal: defaultOptions.goal,
+          schema: defaultOptions.schema,
+          history: expect.arrayContaining([
+            expect.objectContaining({ type: "INIT" }),
+          ]), // History will contain the INIT event
+          userContext: defaultOptions.userContext,
+        },
+        prompt: "Mocked initial prompt for INIT event",
+      };
+
+      mockResolveRoute.mockImplementation((event: UIEvent) => {
+        if (event.type === "INIT") {
+          // Adjust plannerInput history to include the actual INIT event passed
+          return {
+            ...initialRouteResolution,
+            plannerInput: {
+              ...initialRouteResolution.plannerInput,
+              history: [event],
+            },
+          };
+        }
+        return null; // Should not be called with other types in this test
+      });
+
       const { result, dispatchSpy } = renderHelper({ mockMode: false });
 
       await act(async () => {
@@ -177,10 +226,12 @@ describe("useUIStateEngine", () => {
       expect(mockCallPlannerLLM).toHaveBeenCalledWith(
         expect.objectContaining({
           goal: defaultOptions.goal,
-          history: [],
+          history: expect.arrayContaining([
+            expect.objectContaining({ type: "INIT" }),
+          ]),
         }),
-        undefined,
-        undefined
+        "",
+        expect.objectContaining(initialRouteResolution)
       );
       // expect(dispatchSpy).toHaveBeenCalledWith({
       //   type: "AI_RESPONSE",
@@ -197,6 +248,35 @@ describe("useUIStateEngine", () => {
       mockCallPlannerLLM.mockImplementation(async () => {
         throw new Error(errorMessage);
       });
+
+      // Mock resolveRoute for the INIT event, similar to the success case
+      const initialErrorRouteResolution: RouteResolution = {
+        actionType: ActionType.FULL_REFRESH,
+        targetNodeId: "root",
+        plannerInput: {
+          goal: defaultOptions.goal,
+          schema: defaultOptions.schema,
+          history: expect.arrayContaining([
+            expect.objectContaining({ type: "INIT" }),
+          ]),
+          userContext: defaultOptions.userContext,
+        },
+        prompt: "Mocked initial prompt for INIT error case",
+      };
+
+      mockResolveRoute.mockImplementation((event: UIEvent) => {
+        if (event.type === "INIT") {
+          return {
+            ...initialErrorRouteResolution,
+            plannerInput: {
+              ...initialErrorRouteResolution.plannerInput,
+              history: [event],
+            },
+          };
+        }
+        return null;
+      });
+
       const { result, dispatchSpy } = renderHelper({ mockMode: false });
 
       await act(async () => {
@@ -204,7 +284,17 @@ describe("useUIStateEngine", () => {
       });
 
       // expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: true });
-      expect(mockCallPlannerLLM).toHaveBeenCalled();
+      // Check that callPlannerLLM was called with the correct arguments from the mocked route
+      expect(mockCallPlannerLLM).toHaveBeenCalledWith(
+        expect.objectContaining({
+          goal: defaultOptions.goal,
+          history: expect.arrayContaining([
+            expect.objectContaining({ type: "INIT" }),
+          ]),
+        }),
+        "",
+        expect.objectContaining(initialErrorRouteResolution)
+      );
       // expect(dispatchSpy).toHaveBeenCalledWith({ type: "ERROR", message: errorMessage });
       // expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: false });
       expect(result.current.state.layout).toBeNull();
@@ -314,7 +404,7 @@ describe("useUIStateEngine", () => {
             goal: defaultOptions.goal,
             history: expect.arrayContaining([testEvent]),
           }),
-          undefined,
+          "",
           undefined
         );
         // expect(dispatchSpy).toHaveBeenCalledWith({ type: "AI_RESPONSE", node: successNode });
@@ -365,8 +455,8 @@ describe("useUIStateEngine", () => {
         expect(mockResolveRoute).toHaveBeenCalled();
         expect(mockCallPlannerLLM).toHaveBeenCalledWith(
           partialUpdateRouteResult.plannerInput,
-          partialUpdateRouteResult,
-          undefined
+          "",
+          partialUpdateRouteResult
         );
         // expect(dispatchSpy).toHaveBeenCalledWith({ type: "PARTIAL_UPDATE", nodeId: partialUpdateRouteResult.targetNodeId, node: successNode });
         expect(result.current.state.error).toBeNull();
@@ -391,8 +481,8 @@ describe("useUIStateEngine", () => {
 
         expect(mockCallPlannerLLM).toHaveBeenCalledWith(
           partialUpdateRouteResult.plannerInput,
-          partialUpdateRouteResult,
-          undefined
+          "",
+          partialUpdateRouteResult
         );
         // expect(dispatchSpy).toHaveBeenCalledWith({ type: "ERROR", message: errorMessage });
         expect(result.current.state.error).toBe(errorMessage);

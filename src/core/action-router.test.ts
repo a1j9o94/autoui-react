@@ -4,8 +4,9 @@ import {
   ActionType,
   ActionRouteConfig,
   createDefaultRouter,
+  buildPrompt,
 } from "./action-router";
-import { UIEvent, UISpecNode } from "../schema/ui";
+import { UIEvent, UISpecNode, PlannerInput } from "../schema/ui";
 import * as Reducer from "./reducer"; // To mock findNodeById
 
 vi.mock("./reducer", () => ({
@@ -352,6 +353,96 @@ describe("ActionRouter", () => {
     });
   });
 
+  describe("buildPrompt", () => {
+    it("should build a proper prompt from planner input", () => {
+      const input: PlannerInput = {
+        schema: {
+          users: {
+            tableName: "users",
+            columns: { id: { type: "uuid" }, name: { type: "text" } },
+          },
+          todos: {
+            tableName: "todos",
+            columns: { id: { type: "uuid" }, title: { type: "text" } },
+          },
+        },
+        goal: "Create a todo management app",
+        history: [
+          {
+            type: "CLICK",
+            nodeId: "add-todo-button",
+            timestamp: 123456789,
+            payload: { detail: "test" },
+          },
+        ],
+        userContext: { userId: "test-user" },
+      };
+
+      const prompt = buildPrompt(input);
+
+      // Check that the prompt contains key elements
+      expect(prompt).toContain("Create a todo management app");
+      expect(prompt).toContain("Table: users");
+      expect(prompt).toContain(
+        'Schema: {"tableName":"users","columns":{"id":{"type":"uuid"},"name":{"type":"text"}}}'
+      );
+      expect(prompt).toContain("Table: todos");
+      expect(prompt).toContain(
+        'Schema: {"tableName":"todos","columns":{"id":{"type":"uuid"},"title":{"type":"text"}}}'
+      );
+      expect(prompt).toContain(
+        'Event: CLICK on node add-todo-button with payload {"detail":"test"}'
+      );
+      expect(prompt).toContain('User Context:\n{"userId":"test-user"}');
+      expect(prompt).toContain("UI Guidance:"); // Check that guidance is included
+    });
+
+    it("should use custom prompt template when provided", () => {
+      const input: PlannerInput = {
+        schema: {},
+        goal: "Test goal",
+        history: null,
+        userContext: null,
+      };
+
+      const customTemplate = "This is a custom template for ${goal}";
+      // buildPrompt now takes template and values separately if a template is used
+      // For direct custom prompt string, the router logic passes it directly
+      // Let's test the scenario where buildPrompt gets a template
+
+      // Mocking the values buildPrompt would receive internally in resolveRoute
+      const templateValues = {
+        goal: input.goal,
+        eventType: "N/A",
+        nodeId: "N/A",
+        targetNodeId: "N/A",
+        actionType: "N/A",
+      };
+
+      const prompt = buildPrompt(input, customTemplate, templateValues);
+
+      expect(prompt).toBe("This is a custom template for Test goal");
+    });
+
+    it("should handle null history and userContext", () => {
+      const input: PlannerInput = {
+        schema: {
+          tasks: { tableName: "tasks", columns: { id: { type: "uuid" } } },
+        },
+        goal: "Simple task view",
+        history: null,
+        userContext: null,
+      };
+
+      const prompt = buildPrompt(input);
+
+      expect(prompt).toContain("Simple task view");
+      expect(prompt).toContain("Table: tasks");
+      expect(prompt).toContain("Recent user interactions:\nNo recent events");
+      expect(prompt).not.toContain("User Context:");
+    });
+  });
+
   describe("createDefaultRouter", () => {
     it("should return an ActionRouter instance", () => {
       const defaultRouter = createDefaultRouter();
@@ -367,12 +458,25 @@ describe("ActionRouter", () => {
         mockSchema,
         mockLayout,
         mockDataContext,
-        mockGoal,
+        mockGoal, // "Test Goal"
         mockUserContext
       );
 
-      const expectedPrompt =
-        'Generate a new UI for the goal: "Test Goal". The user just clicked on node button-id';
+      // Build the expected prompt using the actual buildPrompt function and the input it receives
+      const expectedPlannerInput: PlannerInput = {
+        schema: mockSchema,
+        goal: mockGoal,
+        history: [testEvent],
+        userContext: mockUserContext,
+      };
+
+      // For the default CLICK route (no promptTemplate), buildPrompt is called
+      // without a template or templateValues. It uses its default logic.
+      const expectedPrompt = buildPrompt(
+        expectedPlannerInput,
+        undefined, // No template specified for the default CLICK route
+        undefined // No values needed as no template is processed
+      );
 
       expect(resolution?.actionType).toBe(ActionType.FULL_REFRESH);
       expect(resolution?.prompt).toBe(expectedPrompt);

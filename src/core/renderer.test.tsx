@@ -23,9 +23,7 @@ vi.mock("../adapters/shadcn", () => ({
       if (processEvent) {
         console.log("Unexpected value for processEvent", processEvent);
       }
-      return (
-        <div data-testid={node.id}>Mock-{node.node_type}</div>
-      );
+      return <div data-testid={node.id}>Mock-{node.node_type}</div>;
     }
   ),
   ShimmerBlock: () => <div data-testid="shimmer-block">ShimmerBlock</div>,

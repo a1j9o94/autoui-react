@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PlannerInput, UIEvent, UISpecNode } from "../schema/ui";
 // Restore static imports
-import { buildPrompt, mockPlanner, callPlannerLLM, processEvent } from "./planner";
+import { mockPlanner, callPlannerLLM, processEvent } from "./planner";
 import { ActionRouter } from "./action-router";
+import { ActionType, RouteResolution } from "./action-router";
+import { buildPrompt } from "./action-router";
 
 // Mock the system events
 vi.mock("./system-events", () => ({
@@ -32,58 +34,6 @@ describe("Planner", () => {
     consoleErrorSpy.mockRestore();
   });
 
-  describe("buildPrompt", () => {
-    it("should build a proper prompt from planner input", () => {
-      const input: PlannerInput = {
-        schema: {
-          users: {
-            id: "string",
-            name: "string",
-            email: "string",
-          },
-          todos: {
-            id: "string",
-            title: "string",
-            completed: "boolean",
-            userId: "string",
-          },
-        },
-        goal: "Create a todo management app",
-        history: [
-          {
-            type: "CLICK",
-            nodeId: "add-todo-button",
-            timestamp: 123456789,
-            payload: null,
-          },
-        ],
-        userContext: null,
-      };
-
-      const prompt = buildPrompt(input);
-
-      // Check that the prompt contains key elements
-      expect(prompt).toContain("Create a todo management app");
-      expect(prompt).toContain("Table: users");
-      expect(prompt).toContain("Table: todos");
-      expect(prompt).toContain("Event: CLICK on node add-todo-button");
-    });
-
-    it("should use custom prompt when provided", () => {
-      const input: PlannerInput = {
-        schema: {},
-        goal: "Test goal",
-        history: null,
-        userContext: null,
-      };
-
-      const customPrompt = "This is a custom prompt";
-      const prompt = buildPrompt(input, customPrompt);
-
-      expect(prompt).toBe(customPrompt);
-    });
-  });
-
   describe("mockPlanner", () => {
     it("should return a mock UI spec node", () => {
       const input: PlannerInput = {
@@ -97,9 +47,24 @@ describe("Planner", () => {
 
       expect(mockNode.id).toBe("root");
       expect(mockNode.node_type).toBe("Container");
-      expect(mockNode.children).toHaveLength(2); // Now expects 2 children
-      expect(mockNode.children?.[0].node_type).toBe("Header"); // First child is a Header
-      expect(mockNode.children?.[1].node_type).toBe("Container"); // Second child is Container
+      // Find the ListView node within the mock structure
+      // Note: This structure might change if mockPlanner is updated significantly
+      const mainContent = mockNode.children?.find(
+        (c) => c.id === "main-content"
+      );
+      const tasksContainer = mainContent?.children?.find(
+        (c) => c.id === "tasks-container"
+      );
+      const listView = tasksContainer?.children?.find(
+        (c) => c.node_type === "ListView"
+      );
+
+      expect(listView).toBeDefined();
+      expect(listView?.bindings).toBeDefined();
+      // Expect the data binding key to be 'data' and the value to be the path 'tasks.data'
+      expect(listView?.bindings?.data).toBe("tasks.data");
+      // Optionally, check that the old 'items' binding is gone (or adjust if standard changes)
+      // expect(listView?.bindings?.items).toBeUndefined();
     });
 
     it("should use provided targetNodeId", () => {
@@ -128,7 +93,7 @@ describe("Planner", () => {
 
       // Call the statically imported function without providing an API key.
       // The internal logic of callPlannerLLM should now handle this and return the mock.
-      const result = await callPlannerLLM(input, undefined, undefined);
+      const result = await callPlannerLLM(input, "", undefined);
 
       // Verify the mock result
       expect(result).toBeDefined();
@@ -145,31 +110,93 @@ describe("Planner", () => {
   (process.env.VITE_OPENAI_API_KEY ? describe : describe.skip)(
     "Integration with real LLM",
     () => {
-      it("should generate UI with a real LLM call", async () => {
-        // Use statically imported callPlannerLLM
+      // Helper function to find a node by type recursively
+      const findNodeByTypeRecursively = (
+        node: UISpecNode | undefined,
+        nodeType: string
+      ): UISpecNode | undefined => {
+        if (!node) return undefined;
+        if (node.node_type === nodeType) return node;
+        if (node.children) {
+          for (const child of node.children) {
+            const found = findNodeByTypeRecursively(child, nodeType);
+            if (found) return found;
+          }
+        }
+        return undefined;
+      };
+      
+      it("should generate a valid root UI node", async () => {
         const input: PlannerInput = {
-          schema: {
-            todos: {
-              id: "string",
-              title: "string",
-              completed: "boolean",
-            },
-          },
-          goal: "Create a simple todo list with just a title and checkbox",
+          schema: { simple: { value: "string" } },
+          goal: "Display a simple value",
           history: null,
           userContext: null,
         };
+        const prompt = buildPrompt(input); // Generate default prompt
+        const mockRouteResolution: RouteResolution = {
+          prompt,
+          actionType: ActionType.FULL_REFRESH,
+          targetNodeId: "root",
+          plannerInput: input,
+        };
+
         try {
-          // Pass the key directly
-          const result = await callPlannerLLM(input, undefined, process.env.VITE_OPENAI_API_KEY);
+          const result = await callPlannerLLM(
+            input,
+            process.env.VITE_OPENAI_API_KEY || "",
+            mockRouteResolution
+          );
           expect(result).toBeDefined();
           expect(result.id).toBeDefined();
-          expect(result.node_type).toBeDefined();
+          expect(result.node_type).toBe("Container"); // Expect a root container
         } catch (error) {
-          console.error("LLM call failed:", error);
+          console.error("LLM call failed in root node test:", error);
           throw error;
         }
       }, 30000);
+
+      it("should generate correct ListView data binding for nested data", async () => {
+        const input: PlannerInput = {
+          schema: {
+            // Schema where data is nested under a key
+            tasks: {
+              schema: { id: "string", title: "string" }, // Mock schema part
+              data: [{ id: "1", title: "Task 1" }], // The actual data array
+            },
+          },
+          goal: "Display a list of tasks",
+          history: null,
+          userContext: null,
+        };
+        const prompt = buildPrompt(input); // Generate default prompt with updated guidance
+        const mockRouteResolution: RouteResolution = {
+          prompt,
+          actionType: ActionType.FULL_REFRESH,
+          targetNodeId: "root",
+          plannerInput: input,
+        };
+
+        try {
+          const result = await callPlannerLLM(
+            input,
+            process.env.VITE_OPENAI_API_KEY || "",
+            mockRouteResolution
+          );
+          
+          // Find the ListView node within the result
+          const listViewNode = findNodeByTypeRecursively(result, "ListView");
+          
+          expect(listViewNode).toBeDefined(); // Check if a ListView was generated
+          expect(listViewNode?.bindings).toBeDefined();
+          // **CRITICAL ASSERTION:** Check if the data binding path is correct
+          expect(listViewNode?.bindings?.data).toBe("tasks.data"); 
+
+        } catch (error) {
+          console.error("LLM call failed in list binding test:", error);
+          throw error;
+        }
+      }, 30000); // Increase timeout if needed
     }
   );
 
@@ -197,7 +224,16 @@ describe("Planner", () => {
 
       await expect(
         // Pass undefined for API key, processEvent passes it down
-        processEvent(event, emptyRouter, {}, layout, {}, "Test goal", undefined, undefined)
+        processEvent(
+          event,
+          emptyRouter,
+          {},
+          layout,
+          {},
+          "Test goal",
+          undefined,
+          undefined
+        )
       ).rejects.toThrow("No route found for event");
     });
   });
