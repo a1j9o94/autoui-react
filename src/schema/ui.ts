@@ -76,10 +76,10 @@ const openAIBaseNode = z.object({
     "The type of UI component (e.g., Container, Text, Button, ListView)."
   ),
   props: openAIRecordSimplifiedNullable.describe(
-    "Component-specific properties (attributes). Values should be strings or null. E.g., for Header use { \"title\": \"My Title\" }; for Text use { \"text\": \"My Text\" }."
+    'Component-specific properties (attributes). Values should be strings or null. E.g., for Header use { "title": "My Title" }; for Text use { "text": "My Text" }.'
   ),
   bindings: openAIRecordSimplifiedNullable.describe(
-    "Data bindings map context paths to component props. Values are paths (e.g., \"user.name\") or templates (e.g., \"{{item.title}}\"). **CRITICAL for ListView/Table:** the \`data\` key MUST point to the *exact array path* (e.g., { \"data\": \"tasks.data\" } or { \"data\": \"userList\" }), NOT the parent object."
+    'Data bindings map context paths to component props. Values are paths (e.g., "user.name") or templates (e.g., "{{item.title}}"). **CRITICAL for ListView/Table:** the `data` key MUST point to the *exact array path* (e.g., { "data": "tasks.data" } or { "data": "userList" }), NOT the parent object.'
   ),
   events: z
     .record(

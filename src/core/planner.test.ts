@@ -125,7 +125,7 @@ describe("Planner", () => {
         }
         return undefined;
       };
-      
+
       it("should generate a valid root UI node", async () => {
         const input: PlannerInput = {
           schema: { simple: { value: "string" } },
@@ -183,15 +183,14 @@ describe("Planner", () => {
             process.env.VITE_OPENAI_API_KEY || "",
             mockRouteResolution
           );
-          
+
           // Find the ListView node within the result
           const listViewNode = findNodeByTypeRecursively(result, "ListView");
-          
+
           expect(listViewNode).toBeDefined(); // Check if a ListView was generated
           expect(listViewNode?.bindings).toBeDefined();
           // **CRITICAL ASSERTION:** Check if the data binding path is correct
-          expect(listViewNode?.bindings?.data).toBe("tasks.data"); 
-
+          expect(listViewNode?.bindings?.data).toBe("tasks.data");
         } catch (error) {
           console.error("LLM call failed in list binding test:", error);
           throw error;

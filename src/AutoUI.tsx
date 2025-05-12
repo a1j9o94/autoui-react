@@ -17,15 +17,22 @@ import {
 import "./styles/autoui.css";
 
 // Helper function to correct list bindings
-function correctListBindingsRecursive(node: UISpecNode, dataContext: DataContext): UISpecNode {
+function correctListBindingsRecursive(
+  node: UISpecNode,
+  dataContext: DataContext
+): UISpecNode {
   // Deep clone to avoid mutating the original state.layout directly during correction
   // This is important because state.layout might be used elsewhere or in dependencies.
   const correctedNode = JSON.parse(JSON.stringify(node)) as UISpecNode;
 
-  if ((correctedNode.node_type === "ListView" || correctedNode.node_type === "Table") && correctedNode.bindings?.data) {
+  if (
+    (correctedNode.node_type === "ListView" ||
+      correctedNode.node_type === "Table") &&
+    correctedNode.bindings?.data
+  ) {
     const bindingPath = correctedNode.bindings.data;
-    if (typeof bindingPath === 'string') {
-      const pathSegments = bindingPath.split('.');
+    if (typeof bindingPath === "string") {
+      const pathSegments = bindingPath.split(".");
       const mainKey = pathSegments[0]; // e.g., 'tasks'
 
       // Check if the binding path is just the main key (e.g., "tasks")
@@ -34,20 +41,24 @@ function correctListBindingsRecursive(node: UISpecNode, dataContext: DataContext
         const potentialDataContextEntry = dataContext[mainKey];
         if (
           potentialDataContextEntry &&
-          typeof potentialDataContextEntry === 'object' &&
+          typeof potentialDataContextEntry === "object" &&
           potentialDataContextEntry !== null &&
-          'data' in potentialDataContextEntry &&
+          "data" in potentialDataContextEntry &&
           Array.isArray((potentialDataContextEntry as { data: unknown }).data)
         ) {
           correctedNode.bindings.data = `${mainKey}.data`;
-          console.log(`[AutoUI Debug] Corrected list binding for node '${correctedNode.id}': from '${mainKey}' to '${mainKey}.data'`);
+          console.log(
+            `[AutoUI Debug] Corrected list binding for node '${correctedNode.id}': from '${mainKey}' to '${mainKey}.data'`
+          );
         }
       }
     }
   }
 
   if (correctedNode.children) {
-    correctedNode.children = correctedNode.children.map(child => correctListBindingsRecursive(child, dataContext));
+    correctedNode.children = correctedNode.children.map((child) =>
+      correctListBindingsRecursive(child, dataContext)
+    );
   }
 
   return correctedNode;
@@ -426,7 +437,10 @@ export const AutoUI: React.FC<AutoUIProps> = ({
       );
 
       // Correct list bindings before attempting to resolve them
-      const correctedLayout = correctListBindingsRecursive(state.layout, dataContext);
+      const correctedLayout = correctListBindingsRecursive(
+        state.layout,
+        dataContext
+      );
       console.log(
         "[AutoUI Debug] Layout after binding correction (before resolving):",
         JSON.stringify(correctedLayout, null, 2)

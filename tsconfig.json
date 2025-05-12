@@ -22,8 +22,13 @@
     "noImplicitAny": true,
     "exactOptionalPropertyTypes": true,
     "allowImportingTsExtensions": true,
-    "types": ["vitest/globals", "@testing-library/jest-dom"]
+    "types": ["vitest/globals", "@testing-library/jest-dom"],
+    "baseUrl": ".",
+    "paths": {
+      "@/lib/*": ["./src/lib/*"],
+      "@/components/*": ["./components/*"]
+    }
   },
-  "include": ["src", "example/ai-sdk-example.ts", "example/AIGeneratedUI.tsx", "example/basic-usage.ts"],
+  "include": ["src", "example/ai-sdk-example.ts", "example/AIGeneratedUI.tsx", "example/basic-usage.ts", "lib", "components"],
   "exclude": ["node_modules", "dist", "example"]
 }

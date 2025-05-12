@@ -143,52 +143,157 @@ export function processBinding(
   context: DataContext,
   itemData?: Record<string, unknown> // Added item context
 ): unknown {
-  // If binding is a string, check if it's a template or a direct value
   if (typeof binding === "string") {
-    // Handle Template Strings like {{item.name}} or {{user.role}}
-    if (binding.startsWith("{{") && binding.endsWith("}}")) {
-      const path = binding.slice(2, -2).trim();
-      let value: unknown;
+    const exactMatchArr = binding.match(/^{{(.*)}}$/);
+    const pathInsideExact = exactMatchArr ? exactMatchArr[1].trim() : null;
 
-      // Check if path starts with 'item.' or 'row.' and we have itemData
-      if (path.startsWith("item.") && itemData) {
-        const itemPath = path.substring(5); // Get path within item
-        value = getValueByPath(itemData, itemPath);
-      } else if (path.startsWith("row.") && itemData) {
-        const rowPath = path.substring(4); // Get path within item
-        value = getValueByPath(itemData, rowPath);
-      } else if (itemData && path in itemData) {
-        // Allow direct access like {{title}} if resolving for an item
-        value = getValueByPath(itemData, path);
+    // Case 1: True "Exact Template" like {{item.name}}
+    if (
+      pathInsideExact !== null &&
+      !pathInsideExact.includes("{{") &&
+      !pathInsideExact.includes("}}")
+    ) {
+      const pathToResolve = pathInsideExact;
+      let resolvedValue: unknown = undefined;
+      // --- DEBUG LOGGING ---
+      console.log(
+        `[processBinding Debug] Processing EXACT template: "${binding}", Path: "${pathToResolve}", Has itemData: ${!!itemData}`
+      );
+      if (itemData) {
+        // Log itemData content for debugging
+        try {
+          console.log(
+            `[processBinding Debug] itemData content (EXACT):`,
+            JSON.parse(JSON.stringify(itemData))
+          );
+        } catch {
+          /* ignore logging error */
+        }
+      }
+      // --- DEBUG LOGGING END ---
+
+      if (
+        (pathToResolve.startsWith("item.") ||
+          pathToResolve.startsWith("row.")) &&
+        itemData
+      ) {
+        if (pathToResolve.startsWith("item.")) {
+          resolvedValue = getValueByPath(itemData, pathToResolve.substring(5));
+        } else {
+          // Starts with "row."
+          resolvedValue = getValueByPath(itemData, pathToResolve.substring(4));
+        }
+      } else if (itemData && pathToResolve in itemData) {
+        // Direct access to itemData property if path doesn't have "item." or "row." prefix but exists in itemData
+        resolvedValue = getValueByPath(itemData, pathToResolve);
       }
 
-      // If not found in item or not an item path, try main context
-      if (value === undefined) {
-        value = getValueByPath(context, path);
+      if (resolvedValue === undefined) {
+        resolvedValue = getValueByPath(context, pathToResolve);
       }
-      return value;
+      return resolvedValue; // Return original type (or undefined)
+
+      // Case 2: "Embedded Template" like "Name: {{item.name}}" or "{{item.name}} has {{item.id}}"
+    } else if (binding.includes("{{") && binding.includes("}}")) {
+      // --- DEBUG LOGGING ---
+      console.log(
+        `[processBinding Debug] Processing EMBEDDED templates: "${binding}", Has itemData: ${!!itemData}`
+      );
+      if (itemData) {
+        // Log itemData content for debugging
+        try {
+          console.log(
+            `[processBinding Debug] itemData content (EMBEDDED):`,
+            JSON.parse(JSON.stringify(itemData))
+          );
+        } catch {
+          /* ignore logging error */
+        }
+      }
+      // --- DEBUG LOGGING END ---
+
+      const resolvedString = binding.replaceAll(
+        /{{(.*?)}}/g, // Non-greedy match inside braces
+        (match, path): string => {
+          const trimmedPath = path.trim();
+          let resolvedValue: unknown = undefined;
+
+          if (
+            (trimmedPath.startsWith("item.") ||
+              trimmedPath.startsWith("row.")) &&
+            itemData
+          ) {
+            if (trimmedPath.startsWith("item.")) {
+              resolvedValue = getValueByPath(
+                itemData,
+                trimmedPath.substring(5)
+              );
+            } else {
+              resolvedValue = getValueByPath(
+                itemData,
+                trimmedPath.substring(4)
+              );
+            }
+          } else if (itemData && trimmedPath in itemData) {
+            resolvedValue = getValueByPath(itemData, trimmedPath);
+          }
+
+          if (resolvedValue === undefined) {
+            resolvedValue = getValueByPath(context, trimmedPath);
+          }
+
+          return resolvedValue === null || resolvedValue === undefined
+            ? "" // Substitute with empty string for unresolved templates in embedded strings
+            : String(resolvedValue);
+        }
+      );
+      return resolvedString; // Return the modified string
+
+      // Case 3: "Path String" like "user.name"
     } else {
-      // It's a literal string, return it directly.
-      // Path resolution for the top-level binding happens in resolveBindings.
-      return binding;
+      const pathToResolve = binding;
+      let resolvedValue: unknown = undefined;
+      // --- DEBUG LOGGING ---
+      console.log(
+        `[processBinding Debug] Processing PATH string: "${pathToResolve}", Has itemData: ${!!itemData}`
+      );
+      // --- DEBUG LOGGING END ---
+
+      // For path strings, prefer context unless itemData is explicitly targeted (e.g. via "item." prefix handled above)
+      // or if it's a simple property name that might exist on itemData.
+      // Given current logic, exact paths like "item.name" are handled by EXACT, "title" could be item or context.
+      // If itemData exists and path is a direct property of itemData (no dots)
+      if (
+        itemData &&
+        !pathToResolve.includes(".") &&
+        pathToResolve in itemData
+      ) {
+        resolvedValue = getValueByPath(itemData, pathToResolve);
+      }
+
+      if (resolvedValue === undefined) {
+        resolvedValue = getValueByPath(context, pathToResolve);
+      }
+      return resolvedValue; // Return resolved value or undefined
     }
   }
 
-  // If binding is an array, process each item recursively (pass itemData down)
+  // If binding is an array, process each item recursively
   if (Array.isArray(binding)) {
     return binding.map((item) => processBinding(item, context, itemData));
   }
 
-  // If binding is an object, process each property recursively (pass itemData down)
+  // If binding is an object, process each property recursively
   if (binding !== null && typeof binding === "object") {
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(binding)) {
+      // IMPORTANT: Recursively call processBinding on the VALUE, not the key
       result[key] = processBinding(value, context, itemData);
     }
     return result;
   }
 
-  // Otherwise, return the binding as-is
+  // Otherwise, return the binding as-is (e.g., boolean, number, null)
   return binding;
 }
 
@@ -241,51 +346,30 @@ export async function resolveBindings(
 
   const resolvedBindings: Record<string, unknown> = {};
   if (node.bindings) {
-    for (const [key, binding] of Object.entries(node.bindings)) {
-      let value: unknown;
-      // If it's a non-template string (doesn't start with {{ ), resolve it as a path.
-      // Prioritize itemData if available.
-      if (typeof binding === "string" && !binding.startsWith("{{")) {
-        if (itemData) {
-          // Try itemData first (e.g., binding is just "title")
-          value = getValueByPath(itemData, binding);
-          if (value === undefined) {
-            // Fallback to main context (e.g., binding is "user.name")
-            value = getValueByPath(context, binding);
-          }
-        } else {
-          // No itemData, just use main context
-          value = getValueByPath(context, binding);
-        }
-      } else {
-        // It's a template string {{...}} or a non-string value (like an object/array)
-        // processBinding handles context/itemData priority internally for {{...}}
-        // and recursively processes objects/arrays.
-        value = processBinding(binding, context, itemData);
-      }
+    for (const [key, bindingValue] of Object.entries(node.bindings)) {
+      const resolvedValue = processBinding(bindingValue, context, itemData);
 
-      resolvedBindings[key] = value;
+      resolvedBindings[key] = resolvedValue;
 
-      // Assign ALL resolved values (not just primitives) to props if the value is defined.
-      if (value !== undefined) {
+      if (resolvedValue !== undefined) {
         if (!result.props) result.props = {};
-        result.props[key] = value;
+        result.props[key] = resolvedValue;
       }
     }
   }
 
-  // Bindings have been processed (moved to props or used for structure like list data)
-  // Clear the bindings from the result node.
   result.bindings = null;
 
-  // --- Process Event Bindings ---
-  // Let the main loop above and recursive calls handle resolving templates within event objects/payloads
-  // if they are defined via bindings. Explicitly processing result.events here after the loop
-  // might be redundant or interfere if events weren't defined via bindings initially.
-  // Remove the explicit call:
-  // if (result.events) { ... processBinding(result.events, ...) ... }
+  if (node.events) {
+    result.events = processBinding(
+      node.events,
+      context,
+      itemData
+    ) as UISpecNode["events"];
+  } else {
+    result.events = null;
+  }
 
-  // Get the value of the data binding, trying common keys like 'data' or 'items'
   const dataBindingValue =
     resolvedBindings["data"] ?? resolvedBindings["items"];
 
@@ -304,11 +388,14 @@ export async function resolveBindings(
               `List item at index ${index} for node ${node.id} is not an object:`,
               currentItemData
             );
-            return null; // Return null for items that cannot be processed
+            return null;
           }
-          console.log(`[resolveBindings Debug] Mapping item ${index} for node ${node.id}:`, currentItemData);
+          // console.log(`[resolveBindings Debug] Mapping item ${index} for node ${node.id}:`, currentItemData);
 
-          const currentItemAsRecord = currentItemData as Record<string, unknown>;
+          const currentItemAsRecord = currentItemData as Record<
+            string,
+            unknown
+          >;
           const itemId = currentItemAsRecord.id as string | number | undefined;
           const instanceId = `${templateChild.id}-${itemId || index}`;
 
@@ -322,50 +409,33 @@ export async function resolveBindings(
             context,
             currentItemAsRecord
           );
-          console.log(`[resolveBindings Debug] Resolved child for item ${index} (node ${node.id}):`, JSON.parse(JSON.stringify(resolvedChild)));
-
-          // We resolved the child node's bindings/props above. Now, specifically resolve bindings
-          // within the events of the newly created child instance using itemData.
-          if (resolvedChild.events) {
-            resolvedChild.events = processBinding(
-              resolvedChild.events,
-              context,
-              currentItemAsRecord
-            ) as UISpecNode["events"];
-          }
+          // console.log(`[resolveBindings Debug] Resolved child for item ${index} (node ${node.id}):`, JSON.parse(JSON.stringify(resolvedChild)));
 
           if (!resolvedChild.props) resolvedChild.props = {};
           resolvedChild.props.key = itemId || `${node.id}-item-${index}`;
 
           return resolvedChild;
         } catch (error) {
-          console.error(`[resolveBindings Error] Error processing item at index ${index} for node ${node.id}:`, error, "Item Data:", currentItemData);
-          return null; // Return null if an error occurs for this item
+          console.error(
+            `[resolveBindings Error] Error processing item at index ${index} for node ${node.id}:`,
+            error,
+            "Item Data:",
+            currentItemData
+          );
+          return null;
         }
       })
     );
-    // Filter out nulls and assert the type for result.children
     result.children = mappedChildren.filter(
       (child) => child !== null
     ) as UISpecNode[];
-    console.log(`[resolveBindings Debug] Final mapped children for node ${node.id}:`, JSON.parse(JSON.stringify(result.children))); // Log the final array assigned
+    // console.log(`[resolveBindings Debug] Final mapped children for node ${node.id}:`, JSON.parse(JSON.stringify(result.children)));
   } else if (node.children && node.children.length > 0) {
-    // Ensure node.children exists and is not empty
     result.children = await Promise.all(
       node.children.map((child) => resolveBindings(child, context, itemData))
     );
-    // Remove redundant event processing for non-list children here too.
-    // The recursive call to resolveBindings above handles resolving bindings
-    // within the children, including any potential bindings within their event structures.
-    /*
-    result.children.forEach(resolvedChild => {
-        if (resolvedChild.events) {
-            resolvedChild.events = processBinding(resolvedChild.events, context, itemData) as UISpecNode['events'];
-        }
-    });
-    */
   } else {
-    result.children = []; // Default to empty array if no children or not a list view expansion
+    result.children = [];
   }
 
   if (!itemData) {
@@ -380,7 +450,6 @@ export async function resolveBindings(
   bindingsCache.set(cacheKey, result);
   nodeCacheTimestamps.set(cacheKey, currentTime);
 
-  // Clean up old cache entries
   if (bindingsCache.size > MAX_CACHE_SIZE) {
     let oldestKey: string | null = null;
     let oldestTimestamp = currentTime;

@@ -1,9 +1,54 @@
 import React from "react";
 import { UISpecNode, UIEvent, UIEventType } from "../schema/ui";
-import { componentConfig } from "../schema/components";
+import { cn } from "@/lib/utils";
+import {
+  Dialog,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogContent,
+} from "@/components/ui/dialog";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Label } from "@/components/ui/label";
 
-// This would typically import components from your shadcn UI library
-// For this example, we'll create placeholder components
+// Utility to parse CSS style string into a React style object
+const parseStyleString = (styleString: string): React.CSSProperties => {
+  if (typeof styleString !== "string") {
+    // If it's not a string (e.g., already an object or undefined), return it as is or an empty object
+    return typeof styleString === "object" ? styleString : {};
+  }
+  const style: React.CSSProperties = {};
+  styleString.split(";").forEach((declaration) => {
+    const [property, value] = declaration.split(":");
+    if (property && value) {
+      const camelCasedProperty = property
+        .trim()
+        .replace(/-([a-z])/g, (g) => g[1].toUpperCase());
+      // Revert to simple assignment, accepting the potential type mismatch flagged by linter.
+      // Casting to 'any' is forbidden, and 'string' doesn't satisfy all properties.
+      // @ts-expect-error // Suppressing complex type checking for dynamic style parsing
+      style[camelCasedProperty as keyof React.CSSProperties] = value.trim();
+    }
+  });
+  return style;
+};
+
+const isArrayOf =
+  <T,>(guard: (item: unknown) => item is T) =>
+  (arr: unknown): arr is T[] =>
+    Array.isArray(arr) && arr.every(guard);
 
 // Shimmer components
 export const ShimmerBlock: React.FC = () => (
@@ -73,52 +118,6 @@ const Button: React.FC<{
   >
     {children}
   </button>
-);
-
-const Table: React.FC<{
-  items?: Record<string, React.ReactNode>[] | undefined;
-  fields?: { key: string; label: string }[] | undefined;
-  onSelect?: ((item: Record<string, React.ReactNode>) => void) | undefined;
-  selectable?: boolean | undefined;
-}> = ({ items = [], fields = [], onSelect, selectable }) => (
-  <div className="w-full border border-gray-300 dark:border-gray-700 rounded-lg overflow-hidden shadow-sm">
-    <table className="w-full">
-      <thead className="bg-gray-100 dark:bg-gray-800 border-b border-gray-300 dark:border-gray-700">
-        <tr>
-          {fields.map((field) => (
-            <th
-              key={field.key}
-              className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider"
-            >
-              {field.label}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-        {items.map((item, index) => (
-          <tr
-            key={index}
-            onClick={() => selectable && onSelect && onSelect(item)}
-            className={
-              selectable
-                ? "cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800"
-                : ""
-            }
-          >
-            {fields.map((field) => (
-              <td
-                key={field.key}
-                className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 dark:text-gray-300"
-              >
-                {item[field.key] ?? ""}
-              </td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  </div>
 );
 
 const Detail: React.FC<{
@@ -210,8 +209,6 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 const isString = (value: unknown): value is string => typeof value === "string";
 const isBoolean = (value: unknown): value is boolean =>
   typeof value === "boolean";
-const isCSSProperties = (value: unknown): value is React.CSSProperties =>
-  isObject(value); // Simplified check
 const isButtonVariant = (
   value: unknown
 ): value is "default" | "outline" | "destructive" =>
@@ -232,11 +229,6 @@ const getSafeBinding = <T, K extends string, D extends T>(
   return defaultValue;
 };
 
-const isArrayOf =
-  <T extends object>(itemValidator: (item: unknown) => item is T) =>
-  (arr: unknown): arr is T[] =>
-    Array.isArray(arr) && arr.every(itemValidator);
-
 const isReactNode = (value: unknown): value is React.ReactNode => {
   // This is a simplified check. A full check is complex.
   // For basic scenarios, we can check for string, number, boolean, null, undefined, or React elements.
@@ -254,9 +246,6 @@ const isRecordWithReactNodeValues = (
   value: unknown
 ): value is Record<string, React.ReactNode> =>
   isObject(value) && Object.values(value).every(isReactNode);
-
-const isFieldObject = (item: unknown): item is { key: string; label: string } =>
-  isObject(item) && isString(item.key) && isString(item.label);
 
 const isSelectOptionObject = (
   item: unknown
@@ -315,14 +304,40 @@ export const adapterMap: Record<
     processEvent?: (event: UIEvent) => void
   ) => React.ReactElement
 > = {
-  Container: (node, processEvent) => (
-    <Container
-      style={getSafeProp(node.props, "style", isCSSProperties, {})}
-      className={getSafeProp(node.props, "className", isString, "")}
-    >
-      {node.children?.map((child) => renderNode(child, processEvent))}
-    </Container>
-  ),
+  Container: (node, processEvent) => {
+    // Extract key and style first
+    const { className, style: styleProp, key, ...restProps } = node.props || {};
+    // Ensure children are rendered with keys
+    const children = node.children?.map((child) =>
+      // Use React.cloneElement to add the key prop to the element returned by renderNode
+      React.cloneElement(renderNode(child, processEvent), { key: child.id })
+    );
+    // Parse style string if necessary
+    const style =
+      typeof styleProp === "string"
+        ? parseStyleString(styleProp)
+        : (styleProp as React.CSSProperties | undefined);
+
+    return (
+      <div
+        key={key as React.Key} // Pass key directly
+        className={cn("autoui-container", className as string)}
+        style={style} // Use the parsed style object
+        {...restProps}
+        data-id={node.id}
+      >
+        {/* Add console log to see props during render */}
+        {(() => {
+          console.log(
+            `[Adapter Debug] Rendering Container: id=${node.id}, props=`,
+            node.props
+          );
+          return null;
+        })()}
+        {children}
+      </div>
+    );
+  },
 
   Header: (node) => (
     <Header
@@ -341,37 +356,44 @@ export const adapterMap: Record<
   ),
 
   ListView: (node, processEvent) => {
-    const items = getSafeBinding(
-      node.bindings,
-      "items",
-      isArrayOf(isRecordWithReactNodeValues),
-      []
+    // resolveBindings populates node.children with resolved items, each having a key.
+    // We just need to render these children.
+    // Extract key and style first
+    const { className, style: styleProp, key, ...restProps } = node.props || {}; // Removed unused selectable
+
+    // Parse style string if necessary
+    const style =
+      typeof styleProp === "string"
+        ? parseStyleString(styleProp)
+        : (styleProp as React.CSSProperties | undefined);
+
+    // Add console log to see props during render
+    console.log(
+      `[Adapter Debug] Rendering ListView: id=${node.id}, props=`,
+      node.props
     );
-    const fields = getSafeBinding(
-      node.bindings,
-      "fields",
-      isArrayOf(isFieldObject),
-      []
+
+    // The children array from resolveBindings already contains React Elements with keys
+    // if resolveBindings adds the key prop correctly.
+    // If renderNode returns elements, they should retain their keys.
+    // Fix: Add keys to children explicitly like in Container/Card
+    const children = node.children?.map((child) =>
+      React.cloneElement(renderNode(child, processEvent), { key: child.id })
     );
-    const selectable = getSafeProp(node.props, "selectable", isBoolean, false);
 
     return (
-      <Table
-        items={items as Record<string, React.ReactNode>[]}
-        fields={fields}
-        selectable={selectable}
-        onSelect={(item) => {
-          const handler = createEventHandler(
-            node,
-            "onSelect",
-            "CLICK",
-            processEvent
-          );
-          if (handler) {
-            handler({ selectedItem: item });
-          }
-        }}
-      />
+      <div
+        key={key as React.Key} // Pass key directly
+        className={cn(
+          "autoui-listview-container space-y-2",
+          className as string
+        )}
+        style={style} // Use the parsed style object
+        {...restProps} // Spread remaining props (selectable, style, className, key are now excluded)
+        data-id={node.id}
+      >
+        {children}
+      </div>
     );
   },
 
@@ -402,141 +424,318 @@ export const adapterMap: Record<
     );
   },
 
-  Card: (node, processEvent) => (
-    <Card className={getSafeProp(node.props, "className", isString, "")}>
-      {node.children?.map((child) => renderNode(child, processEvent))}
-    </Card>
-  ),
+  Card: (node, processEvent) => {
+    // Extract key and style first
+    const { className, style: styleProp, key, ...restProps } = node.props || {};
+    // Ensure children are rendered with keys
+    const children = node.children?.map((child) =>
+      React.cloneElement(renderNode(child, processEvent), { key: child.id })
+    );
+    // Parse style string if necessary
+    const style =
+      typeof styleProp === "string"
+        ? parseStyleString(styleProp)
+        : (styleProp as React.CSSProperties | undefined);
 
-  Input: (node, processEvent) => (
-    <Input
-      name={getSafeProp(node.props, "name", isString, "inputName")}
-      label={getSafeProp(node.props, "label", isString, "")}
-      placeholder={getSafeProp(node.props, "placeholder", isString, "")}
-      disabled={getSafeProp(node.props, "disabled", isBoolean, false)}
-      value={getSafeBinding(node.bindings, "value", isString, "")}
-      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+    return (
+      <Card
+        key={key as React.Key} // Pass key directly
+        className={cn("autoui-card", className as string)}
+        style={style} // Use parsed style object
+        {...restProps} // Spread remaining props
+        data-id={node.id}
+      >
+        {/* Using CardContent as a default wrapper, adjust if needed */}
+        <CardContent className="p-0">
+          {" "}
+          {/* Example: remove padding if children handle it */}
+          {children}
+        </CardContent>
+      </Card>
+    );
+  },
+
+  Input: (node, processEvent) => {
+    const name = getSafeProp(node.props, "name", isString, "inputName");
+    const label = getSafeProp(node.props, "label", isString, "");
+    const value = getSafeBinding(node.bindings, "value", isString, "");
+    const placeholder = getSafeProp(node.props, "placeholder", isString, "");
+    const disabled = getSafeProp(node.props, "disabled", isBoolean, false);
+    const className = getSafeProp(node.props, "className", isString, "");
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const handler = createEventHandler(
+        node,
+        "onChange",
+        "CHANGE",
+        processEvent
+      );
+      if (handler) handler({ value: e.target.value });
+    };
+
+    const handleFocus = () => {
+      const handler = createEventHandler(
+        node,
+        "onFocus",
+        "FOCUS",
+        processEvent
+      );
+      if (handler) handler({});
+    };
+
+    const handleBlur = () => {
+      const handler = createEventHandler(node, "onBlur", "BLUR", processEvent);
+      if (handler) handler({});
+    };
+
+    return (
+      <div className="grid w-full max-w-sm items-center gap-1.5">
+        {label && <Label htmlFor={name}>{label}</Label>}
+        <Input
+          id={name} // Use name as id for label association
+          name={name}
+          placeholder={placeholder}
+          disabled={disabled}
+          value={value}
+          onChange={handleChange}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+          className={className}
+        />
+      </div>
+    );
+  },
+
+  Select: (node, processEvent) => {
+    const name = getSafeProp(node.props, "name", isString, "selectName");
+    const label = getSafeProp(node.props, "label", isString, "");
+    const placeholder = getSafeProp(
+      node.props,
+      "placeholder",
+      isString,
+      "Select..."
+    );
+    const disabled = getSafeProp(node.props, "disabled", isBoolean, false);
+    const value = getSafeBinding(node.bindings, "value", isString, "");
+    const options = getSafeBinding(
+      node.bindings,
+      "options",
+      isArrayOf(isSelectOptionObject),
+      []
+    );
+    const className = getSafeProp(node.props, "className", isString, "");
+
+    const handleValueChange = (selectedValue: string) => {
+      const handler = createEventHandler(
+        node,
+        "onValueChange",
+        "CHANGE",
+        processEvent
+      );
+      if (handler) handler({ value: selectedValue });
+    };
+
+    return (
+      <div
+        className={cn("grid w-full max-w-sm items-center gap-1.5", className)}
+      >
+        {label && <Label htmlFor={name}>{label}</Label>}
+        <Select
+          name={name}
+          value={value}
+          onValueChange={handleValueChange}
+          disabled={disabled}
+        >
+          <SelectTrigger id={name}>
+            <SelectValue placeholder={placeholder} />
+          </SelectTrigger>
+          <SelectContent>
+            {options.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    );
+  },
+
+  Textarea: (node, processEvent) => {
+    // Extract key first (style is usually handled by className for Textarea, but handle just in case)
+    const { key, ...propsWithoutKey } = node.props || {};
+    const name = getSafeProp(propsWithoutKey, "name", isString, "textareaName");
+    const label = getSafeProp(propsWithoutKey, "label", isString, "");
+    const placeholder = getSafeProp(
+      propsWithoutKey,
+      "placeholder",
+      isString,
+      ""
+    );
+    const disabled = getSafeProp(propsWithoutKey, "disabled", isBoolean, false);
+    const rows = getSafeProp(
+      propsWithoutKey,
+      "rows",
+      (v): v is number => typeof v === "number",
+      3
+    );
+    const value = getSafeBinding(node.bindings, "value", isString, "");
+    const className = getSafeProp(propsWithoutKey, "className", isString, "");
+
+    const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const handler = createEventHandler(
+        node,
+        "onChange",
+        "CHANGE",
+        processEvent
+      );
+      if (handler) handler({ value: e.target.value });
+    };
+
+    const handleFocus = () => {
+      const handler = createEventHandler(
+        node,
+        "onFocus",
+        "FOCUS",
+        processEvent
+      );
+      if (handler) handler({});
+    };
+
+    const handleBlur = () => {
+      const handler = createEventHandler(node, "onBlur", "BLUR", processEvent);
+      if (handler) handler({});
+    };
+
+    return (
+      <div key={key as React.Key} className="grid w-full gap-1.5">
+        {label && <Label htmlFor={name}>{label}</Label>}
+        <Textarea
+          id={name} // Use name as id for label association
+          name={name}
+          placeholder={placeholder}
+          disabled={disabled}
+          rows={rows}
+          value={value}
+          onChange={handleChange}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+          className={className}
+        />
+      </div>
+    );
+  },
+
+  Checkbox: (node, processEvent) => {
+    // Extract key first (style is usually handled by className for Checkbox)
+    const { key, ...propsWithoutKey } = node.props || {};
+    const name = getSafeProp(propsWithoutKey, "name", isString, "checkboxName");
+    const label = getSafeProp(propsWithoutKey, "label", isString, "");
+    const checked = getSafeBinding(node.bindings, "checked", isBoolean, false);
+    const disabled = getSafeProp(propsWithoutKey, "disabled", isBoolean, false);
+    const className = getSafeProp(propsWithoutKey, "className", isString, "");
+
+    const handleCheckedChange = (isChecked: boolean | "indeterminate") => {
+      // Ensure we only pass boolean to our event handler
+      if (typeof isChecked === "boolean") {
         const handler = createEventHandler(
           node,
-          "onChange",
+          "onCheckedChange",
           "CHANGE",
           processEvent
         );
-        if (handler) handler({ value: e.target.value });
-      }}
-      onFocus={
-        createEventHandler(node, "onFocus", "FOCUS", processEvent) || undefined
+        if (handler) handler({ checked: isChecked });
       }
-      onBlur={
-        createEventHandler(node, "onBlur", "BLUR", processEvent) || undefined
-      }
-      className={getSafeProp(node.props, "className", isString, "")}
-    />
-  ),
+    };
 
-  Select: (node, processEvent) => (
-    <Select
-      name={getSafeProp(node.props, "name", isString, "selectName")}
-      options={getSafeBinding(
-        node.bindings,
-        "options",
-        isArrayOf(isSelectOptionObject),
-        []
-      )}
-      label={getSafeProp(node.props, "label", isString, "")}
-      placeholder={getSafeProp(node.props, "placeholder", isString, "")}
-      disabled={getSafeProp(node.props, "disabled", isBoolean, false)}
-      value={getSafeBinding(node.bindings, "value", isString, "")}
-      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
-        const handler = createEventHandler(
-          node,
-          "onChange",
-          "CHANGE",
-          processEvent
-        );
-        if (handler) handler({ value: e.target.value });
-      }}
-      className={getSafeProp(node.props, "className", isString, "")}
-    />
-  ),
+    // Shadcn Checkbox often used with a Label
+    return (
+      <div
+        key={key as React.Key}
+        className={cn("flex items-center space-x-2", className as string)}
+      >
+        <Checkbox
+          id={name} // Use name as id for label association
+          name={name}
+          checked={checked}
+          disabled={disabled}
+          onCheckedChange={handleCheckedChange}
+        />
+        {/* Add the aria-label for accessibility if no visible label */}
+        {label && (
+          <Label htmlFor={name} className="cursor-pointer">
+            {label}
+          </Label>
+        )}
+      </div>
+    );
+  },
 
-  Textarea: (node, processEvent) => (
-    <Textarea
-      name={getSafeProp(node.props, "name", isString, "textareaName")}
-      label={getSafeProp(node.props, "label", isString, "")}
-      placeholder={getSafeProp(node.props, "placeholder", isString, "")}
-      disabled={getSafeProp(node.props, "disabled", isBoolean, false)}
-      rows={getSafeProp(
-        node.props,
-        "rows",
-        (v): v is number => typeof v === "number",
-        3
-      )}
-      value={getSafeBinding(node.bindings, "value", isString, "")}
-      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
-        const handler = createEventHandler(
-          node,
-          "onChange",
-          "CHANGE",
-          processEvent
-        );
-        if (handler) handler({ value: e.target.value });
-      }}
-      onFocus={
-        createEventHandler(node, "onFocus", "FOCUS", processEvent) || undefined
-      }
-      onBlur={
-        createEventHandler(node, "onBlur", "BLUR", processEvent) || undefined
-      }
-      className={getSafeProp(node.props, "className", isString, "")}
-    />
-  ),
+  RadioGroup: (node, processEvent) => {
+    // Extract key first (style is usually handled by className for RadioGroup)
+    const { key, ...propsWithoutKey } = node.props || {};
+    const name = getSafeProp(
+      propsWithoutKey,
+      "name",
+      isString,
+      "radioGroupName"
+    );
+    const label = getSafeProp(propsWithoutKey, "label", isString, "");
+    const value = getSafeBinding(node.bindings, "value", isString, "");
+    const options = getSafeBinding(
+      node.bindings,
+      "options",
+      isArrayOf(isSelectOptionObject),
+      []
+    );
+    const disabled = getSafeProp(propsWithoutKey, "disabled", isBoolean, false);
+    const className = getSafeProp(propsWithoutKey, "className", isString, "");
 
-  Checkbox: (node, processEvent) => (
-    <Checkbox
-      name={getSafeProp(node.props, "name", isString, "checkboxName")}
-      label={getSafeProp(node.props, "label", isString, "")}
-      checked={getSafeBinding(node.bindings, "checked", isBoolean, false)}
-      disabled={getSafeProp(node.props, "disabled", isBoolean, false)}
-      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-        const handler = createEventHandler(
-          node,
-          "onChange",
-          "CHANGE",
-          processEvent
-        );
-        if (handler) handler({ checked: e.target.checked });
-      }}
-      className={getSafeProp(node.props, "className", isString, "")}
-    />
-  ),
+    const handleValueChange = (selectedValue: string) => {
+      const handler = createEventHandler(
+        node,
+        "onValueChange",
+        "CHANGE",
+        processEvent
+      );
+      if (handler) handler({ value: selectedValue });
+    };
 
-  RadioGroup: (node, processEvent) => (
-    <RadioGroup
-      name={getSafeProp(node.props, "name", isString, "radioGroupName")}
-      options={getSafeBinding(
-        node.bindings,
-        "options",
-        isArrayOf(isSelectOptionObject),
-        []
-      )}
-      label={getSafeProp(node.props, "label", isString, "")}
-      value={getSafeBinding(node.bindings, "value", isString, "")}
-      disabled={getSafeProp(node.props, "disabled", isBoolean, false)}
-      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-        const handler = createEventHandler(
-          node,
-          "onChange",
-          "CHANGE",
-          processEvent
-        );
-        if (handler) handler({ value: e.target.value });
-      }}
-      className={getSafeProp(node.props, "className", isString, "")}
-    />
-  ),
+    return (
+      <div
+        key={key as React.Key}
+        className={cn("grid gap-1.5", className as string)}
+      >
+        {label && <Label className="mb-1">{label}</Label>}
+        <RadioGroup
+          name={name}
+          value={value}
+          onValueChange={handleValueChange}
+          disabled={disabled}
+          className="flex flex-col space-y-1"
+        >
+          {options.map((option) => (
+            <div key={option.value} className="flex items-center space-x-2">
+              <RadioGroupItem
+                value={option.value}
+                id={`${name}-${option.value}`}
+              />
+              <Label
+                htmlFor={`${name}-${option.value}`}
+                className="cursor-pointer"
+              >
+                {option.label}
+              </Label>
+            </div>
+          ))}
+        </RadioGroup>
+      </div>
+    );
+  },
 
   Tabs: (node, processEvent) => {
+    // Extract key first (style is usually handled by className for Tabs)
+    const { key, ...propsWithoutKey } = node.props || {};
     // For Tabs, children are defined by the 'tabs' prop which includes content as UISpecNode
     // We need to render these UISpecNode children.
     const rawTabs = getSafeBinding(
@@ -545,60 +744,191 @@ export const adapterMap: Record<
       isArrayOf(isTabObject),
       []
     );
-    const tabs = rawTabs.map((tab) => ({
-      ...tab,
-      content: tab.content
-        ? renderNode(tab.content, processEvent)
-        : "No content", // Render child node or provide fallback
-    }));
+    const defaultValue = getSafeProp(
+      propsWithoutKey,
+      "defaultValue",
+      isString,
+      rawTabs[0]?.value || ""
+    ); // Default to first tab if available
+    const className = getSafeProp(propsWithoutKey, "className", isString, "");
+
+    const handleValueChange = (value: string) => {
+      const handler = createEventHandler(
+        node,
+        "onValueChange",
+        "CHANGE",
+        processEvent
+      );
+      if (handler) handler({ value });
+    };
 
     return (
       <Tabs
-        tabs={tabs}
-        defaultValue={getSafeProp(node.props, "defaultValue", isString, "")}
-        onChange={(value: string) => {
-          const handler = createEventHandler(
-            node,
-            "onChange",
-            "CHANGE",
-            processEvent
-          );
-          if (handler) handler({ value });
-        }}
-        className={getSafeProp(node.props, "className", isString, "")}
-      />
+        key={key as React.Key}
+        defaultValue={defaultValue}
+        onValueChange={handleValueChange}
+        className={cn("autoui-tabs w-full", className)}
+        data-id={node.id}
+      >
+        <TabsList>
+          {rawTabs.map((tab) => (
+            <TabsTrigger key={tab.value} value={tab.value}>
+              {tab.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        {rawTabs.map((tab) => (
+          <TabsContent key={tab.value} value={tab.value}>
+            {tab.content ? renderNode(tab.content, processEvent) : null}
+          </TabsContent>
+        ))}
+      </Tabs>
     );
   },
 
-  Dialog: (node, processEvent) => (
-    <Dialog
-      title={getSafeProp(node.props, "title", isString, "Dialog Title")}
-      open={getSafeBinding(node.bindings, "open", isBoolean, false)}
-      description={getSafeProp(node.props, "description", isString, "")}
-      onClose={
-        createEventHandler(node, "onClose", "CLICK", processEvent) || undefined
+  Dialog: (node, processEvent) => {
+    // Determine if the dialog should be open. Check bindings first, then props.
+    // Default to false if neither is specified.
+    const isOpen = getSafeBinding(
+      node.bindings,
+      "open",
+      isBoolean,
+      getSafeProp(node.props, "open", isBoolean, false)
+    ); // Fallback to props, then false
+
+    // Extract key and className first. Intentionally exclude styleProp and open (_open)
+    const {
+      title,
+      description,
+      className,
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      style: _styleProp,
+      key,
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      open: _openProp,
+      ...restProps
+    } = node.props || {}; // Renamed unused styleProp to _styleProp, open to _openProp
+
+    // Ensure children are rendered with keys
+    const children = node.children?.map((child) =>
+      React.cloneElement(renderNode(child, processEvent), { key: child.id })
+    );
+
+    const handleOpenChange = (open: boolean) => {
+      if (!open) {
+        // Only trigger onClose when dialog is closed
+        const handler = createEventHandler(
+          node,
+          "onClose", // Assumed event name in UISpec
+          "CLICK", // Use CLICK as the event type for closing dialogs
+          processEvent
+        );
+        if (handler) {
+          handler({}); // Trigger with empty payload or adjust as needed
+        }
       }
-      className={getSafeProp(node.props, "className", isString, "")}
-    >
-      {node.children?.map((child) => renderNode(child, processEvent))}
-    </Dialog>
-  ),
+      // We might need to update the state via an event if open is controlled by bindings
+      // For now, assume direct control or one-way binding for visibility
+    };
 
-  Heading: (node) => (
-    <Heading
-      text={getSafeProp(node.props, "text", isString, "Heading")}
-      size={getSafeProp(node.props, "size", isString, "h2")}
-      className={getSafeProp(node.props, "className", isString, "")}
-    />
-  ),
+    // Add console log to see props during render
+    console.log(
+      `[Adapter Debug] Rendering Dialog: id=${node.id}, props=`,
+      node.props,
+      `isOpen=${isOpen}`
+    );
 
-  Text: (node) => (
-    <Text
-      text={getSafeProp(node.props, "text", isString, "Some text")}
-      size={getSafeProp(node.props, "size", isString, "p")} // Size might not be directly applicable for <p> with Tailwind
-      className={getSafeProp(node.props, "className", isString, "")}
-    />
-  ),
+    return (
+      <Dialog
+        key={key as React.Key}
+        open={isOpen}
+        onOpenChange={handleOpenChange}
+      >
+        <DialogContent
+          className={cn("autoui-dialog-content", className as string)}
+          {...restProps} // Pass restProps to DialogContent
+          data-id={node.id} // Add data-id for debugging/testing
+        >
+          {(title || description) && (
+            <DialogHeader>
+              {title && <DialogTitle>{title as string}</DialogTitle>}
+              {description && (
+                <DialogDescription>{description as string}</DialogDescription>
+              )}
+            </DialogHeader>
+          )}
+          {children}
+          {/* Removed explicit Close button, rely on Shadcn's built-in close or trigger via handleOpenChange */}
+        </DialogContent>
+      </Dialog>
+    );
+  },
+
+  Heading: (node) => {
+    // Extract key and style first. Remove unused textProp, levelProp.
+    const { className, style: styleProp, key, ...restProps } = node.props || {};
+    const text = getSafeProp(node.props, "text", isString, "Heading");
+    // Ensure level is a valid heading level (1-6), default to 2
+    let level = getSafeProp(
+      node.props,
+      "level",
+      (v): v is number => typeof v === "number" && v >= 1 && v <= 6,
+      2
+    );
+    if (typeof level !== "number" || level < 1 || level > 6) {
+      level = 2; // Fallback to h2 if level is invalid
+    }
+    const Tag = `h${level}` as keyof JSX.IntrinsicElements;
+    // Parse style string if necessary
+    const style =
+      typeof styleProp === "string"
+        ? parseStyleString(styleProp)
+        : (styleProp as React.CSSProperties | undefined);
+
+    // Apply some default Shadcn-like heading styles based on level
+    const headingStyles =
+      {
+        1: "scroll-m-20 text-4xl font-extrabold tracking-tight lg:text-5xl",
+        2: "scroll-m-20 border-b pb-2 text-3xl font-semibold tracking-tight first:mt-0",
+        3: "scroll-m-20 text-2xl font-semibold tracking-tight",
+        4: "scroll-m-20 text-xl font-semibold tracking-tight",
+        // Add styles for h5, h6 if needed, using text-lg, text-base etc.
+      }[level] || "text-lg font-semibold"; // Default style
+
+    return (
+      <Tag
+        key={key as React.Key}
+        className={cn(headingStyles, className as string)}
+        style={style}
+        {...restProps}
+      >
+        {text}
+      </Tag>
+    );
+  },
+
+  Text: (node) => {
+    // Extract key and style first. Remove unused textProp.
+    const { className, style: styleProp, key, ...restProps } = node.props || {};
+    const text = getSafeProp(node.props, "text", isString, "Some text");
+    // Parse style string if necessary
+    const style =
+      typeof styleProp === "string"
+        ? parseStyleString(styleProp)
+        : (styleProp as React.CSSProperties | undefined);
+
+    // Apply default paragraph styling
+    return (
+      <p
+        key={key as React.Key}
+        className={cn("leading-7", className as string)}
+        style={style}
+        {...restProps}
+      >
+        {text}
+      </p>
+    );
+  },
 };
 
 export function renderNode(
@@ -616,350 +946,3 @@ export function renderNode(
     `Unknown node type: ${node.node_type}`
   );
 }
-
-// Export the component configuration for reference
-export { componentConfig };
-
-// Mock ShadCN components for demonstration
-const Card: React.FC<{ className?: string; children?: React.ReactNode }> = ({
-  className,
-  children,
-}) => (
-  <div
-    className={`autoui-mock-card border rounded-lg p-4 shadow ${
-      className || ""
-    }`}
-  >
-    {children}
-  </div>
-);
-
-const Input: React.FC<{
-  name: string;
-  label?: string;
-  placeholder?: string;
-  disabled?: boolean;
-  value?: string;
-  onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void;
-  onFocus?: (() => void) | undefined;
-  onBlur?: (() => void) | undefined;
-  className?: string;
-}> = ({
-  name,
-  label,
-  placeholder,
-  disabled,
-  value,
-  onChange,
-  onFocus,
-  onBlur,
-  className,
-}) => (
-  <div className={`autoui-mock-input-container ${className || ""}`}>
-    {label && (
-      <label
-        htmlFor={name}
-        className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-      >
-        {label}
-      </label>
-    )}
-    <input
-      type="text"
-      id={name}
-      name={name}
-      placeholder={placeholder}
-      disabled={disabled}
-      value={value ?? ""}
-      onChange={onChange}
-      onFocus={onFocus}
-      onBlur={onBlur}
-      className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-    />
-  </div>
-);
-
-const Select: React.FC<{
-  name: string;
-  options: { value: string; label: string }[];
-  label?: string;
-  placeholder?: string;
-  disabled?: boolean;
-  value?: string;
-  onChange?: (event: React.ChangeEvent<HTMLSelectElement>) => void;
-  className?: string;
-}> = ({
-  name,
-  options,
-  label,
-  placeholder,
-  disabled,
-  value,
-  onChange,
-  className,
-}) => (
-  <div className={`autoui-mock-select-container ${className || ""}`}>
-    {label && (
-      <label
-        htmlFor={name}
-        className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-      >
-        {label}
-      </label>
-    )}
-    <select
-      id={name}
-      name={name}
-      disabled={disabled}
-      value={value ?? ""}
-      onChange={onChange}
-      className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-    >
-      {placeholder && <option value="">{placeholder}</option>}
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
-  </div>
-);
-
-const Textarea: React.FC<{
-  name: string;
-  label?: string;
-  placeholder?: string;
-  disabled?: boolean;
-  value?: string;
-  rows?: number;
-  onChange?: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
-  onFocus?: (() => void) | undefined;
-  onBlur?: (() => void) | undefined;
-  className?: string;
-}> = ({
-  name,
-  label,
-  placeholder,
-  disabled,
-  value,
-  rows,
-  onChange,
-  onFocus,
-  onBlur,
-  className,
-}) => (
-  <div className={`autoui-mock-textarea-container ${className || ""}`}>
-    {label && (
-      <label
-        htmlFor={name}
-        className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-      >
-        {label}
-      </label>
-    )}
-    <textarea
-      id={name}
-      name={name}
-      placeholder={placeholder}
-      disabled={disabled}
-      value={value ?? ""}
-      rows={rows}
-      onChange={onChange}
-      onFocus={onFocus}
-      onBlur={onBlur}
-      className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-    />
-  </div>
-);
-
-const Checkbox: React.FC<{
-  name: string;
-  label?: string;
-  checked?: boolean;
-  disabled?: boolean;
-  onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void;
-  className?: string;
-}> = ({ name, label, checked, disabled, onChange, className }) => (
-  <div
-    className={`autoui-mock-checkbox-container flex items-center ${
-      className || ""
-    }`}
-  >
-    <input
-      type="checkbox"
-      id={name}
-      name={name}
-      checked={checked}
-      disabled={disabled}
-      onChange={onChange}
-      className="h-4 w-4 text-indigo-600 border-gray-300 dark:border-gray-600 rounded focus:ring-indigo-500"
-    />
-    {label && (
-      <label
-        htmlFor={name}
-        className="ml-2 block text-sm text-gray-900 dark:text-gray-300"
-      >
-        {label}
-      </label>
-    )}
-  </div>
-);
-
-const RadioGroup: React.FC<{
-  name: string;
-  options: { value: string; label: string }[];
-  label?: string;
-  value?: string;
-  disabled?: boolean;
-  onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void;
-  className?: string;
-}> = ({ name, options, label, value, disabled, onChange, className }) => (
-  <div className={`autoui-mock-radiogroup-container ${className || ""}`}>
-    {label && (
-      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-        {label}
-      </label>
-    )}
-    <div className="space-y-2">
-      {options.map((option) => (
-        <div key={option.value} className="flex items-center">
-          <input
-            type="radio"
-            id={`${name}-${option.value}`}
-            name={name}
-            value={option.value}
-            checked={value === option.value}
-            disabled={disabled}
-            onChange={onChange}
-            className="h-4 w-4 text-indigo-600 border-gray-300 dark:border-gray-600 focus:ring-indigo-500"
-          />
-          <label
-            htmlFor={`${name}-${option.value}`}
-            className="ml-2 block text-sm text-gray-900 dark:text-gray-300"
-          >
-            {option.label}
-          </label>
-        </div>
-      ))}
-    </div>
-  </div>
-);
-
-const Tabs: React.FC<{
-  tabs: { value: string; label: string; content: React.ReactNode }[];
-  defaultValue?: string;
-  onChange?: (value: string) => void;
-  className?: string;
-}> = ({ tabs, defaultValue, onChange, className }) => {
-  const [activeTab, setActiveTab] = React.useState(
-    defaultValue || (tabs.length > 0 ? tabs[0].value : "")
-  );
-
-  const handleTabClick = (value: string) => {
-    setActiveTab(value);
-    onChange?.(value);
-  };
-
-  return (
-    <div className={`autoui-mock-tabs-container ${className || ""}`}>
-      <div className="border-b border-gray-200 dark:border-gray-700">
-        <nav className="-mb-px flex space-x-8" aria-label="Tabs">
-          {tabs.map((tab) => (
-            <button
-              key={tab.value}
-              onClick={() => handleTabClick(tab.value)}
-              className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === tab.value
-                  ? "border-indigo-500 text-indigo-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300 dark:hover:border-gray-600"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-      </div>
-      <div className="pt-5">
-        {tabs.find((tab) => tab.value === activeTab)?.content}
-      </div>
-    </div>
-  );
-};
-
-const Dialog: React.FC<{
-  title: string;
-  open?: boolean;
-  onClose?: (() => void) | undefined;
-  description?: string;
-  children?: React.ReactNode;
-  className?: string;
-}> = ({ title, open, onClose, description, children, className }) => {
-  if (!open) return null;
-
-  return (
-    <div
-      className={`autoui-mock-dialog-overlay fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity ${
-        className || ""
-      }`}
-    >
-      <div className="fixed inset-0 z-10 overflow-y-auto">
-        <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-          <div className="relative transform overflow-hidden rounded-lg bg-white dark:bg-gray-800 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg">
-            <div className="bg-white dark:bg-gray-800 px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
-              <div className="sm:flex sm:items-start">
-                <div className="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left">
-                  <h3
-                    className="text-lg font-medium leading-6 text-gray-900 dark:text-white"
-                    id="modal-title"
-                  >
-                    {title}
-                  </h3>
-                  {description && (
-                    <div className="mt-2">
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        {description}
-                      </p>
-                    </div>
-                  )}
-                  {children && <div className="mt-4">{children}</div>}
-                </div>
-              </div>
-            </div>
-            <div className="bg-gray-50 dark:bg-gray-700 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
-              <Button onClick={onClose}>Close</Button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const Heading: React.FC<{
-  text: string;
-  size?: string;
-  className?: string;
-}> = ({ text, size = "h2", className }) => {
-  const Tag = size as keyof JSX.IntrinsicElements; // e.g. "h1", "h2"
-  return (
-    <Tag
-      className={`font-semibold text-gray-800 dark:text-white ${
-        className || ""
-      }`}
-    >
-      {text}
-    </Tag>
-  );
-};
-
-const Text: React.FC<{ text: string; size?: string; className?: string }> = ({
-  text,
-  className,
-}) => {
-  // Note: size prop might not directly apply to <p> with Tailwind, styling is primarily via className
-  return (
-    <p className={`text-gray-700 dark:text-gray-300 ${className || ""}`}>
-      {text}
-    </p>
-  );
-};

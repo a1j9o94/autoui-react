@@ -278,15 +278,11 @@ describe("processBinding", () => {
     };
   });
 
-  it("should return literal strings as-is (when not a template string)", () => {
-    // With the new logic, non-template strings are returned literally by processBinding.
-    // Path resolution for top-level bindings (e.g., in a node's `bindings` prop)
-    // is handled by the `resolveBindings` function itself.
-    expect(processBinding("user.name", context)).toBe("user.name");
-    expect(processBinding("directValue", context)).toBe("directValue"); // This is a string literal "directValue"
-    expect(processBinding("nonexistent.path", context)).toBe(
-      "nonexistent.path"
-    );
+  it("should resolve path strings from context (when not a template string)", () => {
+    // processBinding now resolves paths, so it should return the resolved value
+    expect(processBinding("user.name", context)).toBe("Alice");
+    expect(processBinding("directValue", context)).toBe(42);
+    expect(processBinding("nonexistent.path", context)).toBe(undefined);
   });
 
   it("should resolve template strings from context", () => {
@@ -325,7 +321,9 @@ describe("processBinding", () => {
     ).toBeUndefined();
 
     // Added tests for 'row.' prefix
-    expect(processBinding("{{row.id}}", context, itemData)).toBe("item-current");
+    expect(processBinding("{{row.id}}", context, itemData)).toBe(
+      "item-current"
+    );
     expect(processBinding("{{row.value}}", context, itemData)).toBe(500);
     expect(processBinding("{{row.label}}", context, itemData)).toBe(
       "Current Item Label"
@@ -358,7 +356,7 @@ describe("processBinding", () => {
       "non-template",
       "{{nonexistent}}",
     ];
-    const expected = ["Alice", { nested: 500 }, "non-template", undefined];
+    const expected = ["Alice", { nested: 500 }, undefined, undefined];
     expect(processBinding(binding, context, itemData)).toEqual(expected);
   });
 
@@ -382,7 +380,7 @@ describe("processBinding", () => {
       theme: "dark",
       direct: 42,
       missing: undefined,
-      literal: "plain string", // Non-template strings pass through
+      literal: undefined,
       nested: {
         deepItemId: "item-current",
       },
@@ -396,6 +394,35 @@ describe("processBinding", () => {
     expect(processBinding(null, context, itemData)).toBeNull();
     expect(processBinding(undefined, context, itemData)).toBeUndefined();
     // Already tested objects/arrays above
+  });
+
+  it("should resolve embedded template strings", () => {
+    expect(
+      processBinding("User: {{user.name}} ({{user.id}})", context, itemData)
+    ).toBe("User: Alice (user-123)");
+    expect(
+      processBinding(
+        "Item: {{item.label}} - Value: {{item.value}}",
+        context,
+        itemData
+      )
+    ).toBe("Item: Current Item Label - Value: 500");
+    // Test mixing context and item data
+    expect(
+      processBinding("{{user.name}} has item {{item.id}}", context, itemData)
+    ).toBe("Alice has item item-current");
+    // Test with no templates (should be treated as path)
+    expect(
+      processBinding("Just a plain string", context, itemData)
+    ).toBeUndefined(); // Tries to resolve "Just a plain string" as a path
+    // Test with unresolved templates (should become empty string)
+    expect(
+      processBinding(
+        "Missing: {{nonexistent}} and {{item.missing}}",
+        context,
+        itemData
+      )
+    ).toBe("Missing:  and "); // Resolves to empty strings
   });
 });
 
@@ -886,8 +913,16 @@ describe("resolveBindings", () => {
   it("should resolve simple path and object bindings within expanded list items using itemData", async () => {
     // Context with items having simple values and object values
     const listDataWithObjects = [
-      { id: "obj-item-1", name: "First Item", config: { enabled: true, type: "A" } },
-      { id: "obj-item-2", name: "Second Item", config: { enabled: false, type: "B" } },
+      {
+        id: "obj-item-1",
+        name: "First Item",
+        config: { enabled: true, type: "A" },
+      },
+      {
+        id: "obj-item-2",
+        name: "Second Item",
+        config: { enabled: false, type: "B" },
+      },
     ];
     const testContextWithObjects = {
       ...context, // Include base context like user info if needed elsewhere
@@ -929,7 +964,7 @@ describe("resolveBindings", () => {
     const child2 = resolvedNode.children?.[1];
 
     // Check child 1 - resolved using listDataWithObjects[0]
-    expect(child1?.props?.static).toBe("value"); // Static prop preserved
+    expect(child1?.props?.static).toBe("value");
     expect(child1?.props?.title).toBe("First Item"); // Simple path resolved from itemData
     expect(child1?.props?.config).toEqual({ enabled: true, type: "A" }); // Object assigned from binding
     expect(child1?.props?.userName).toBe("Alice"); // Resolved from main context
@@ -965,10 +1000,10 @@ describe("resolveBindings", () => {
           props: {},
           bindings: {
             // These require itemData to be passed and used correctly
-            itemIdFromItem: "{{item.id}}", 
+            itemIdFromItem: "{{item.id}}",
             itemValueFromItem: "{{item.value}}",
             // This requires the main context
-            userNameFromContext: "{{user.name}}", 
+            userNameFromContext: "{{user.name}}",
           },
           events: null,
           children: null,
@@ -984,7 +1019,7 @@ describe("resolveBindings", () => {
 
     // Assertions that should fail if itemData isn't working
     // Check child 1 - resolved using context.items[0] = { id: "item-1", value: 100 }
-    expect(child1?.props?.itemIdFromItem).toBe("item-1"); 
+    expect(child1?.props?.itemIdFromItem).toBe("item-1");
     expect(child1?.props?.itemValueFromItem).toBe(100);
     expect(child1?.props?.userNameFromContext).toBe("Alice"); // Should still work
 
@@ -992,7 +1027,7 @@ describe("resolveBindings", () => {
     expect(child2?.props?.itemIdFromItem).toBe("item-2");
     expect(child2?.props?.itemValueFromItem).toBe(200);
     expect(child2?.props?.userNameFromContext).toBe("Alice"); // Should still work
-    
+
     // Check IDs and Keys are correctly generated
     expect(child1?.id).toBe("fail-item-template-item-1");
     expect(child1?.props?.key).toBe("item-1");
