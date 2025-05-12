@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import { AutoUI } from 'autoui-react';
 
 // Example schema definition
@@ -97,19 +98,30 @@ const exampleSchema = {
 };
 
 export default function Home() {
-  
   return (
     <main className="container mx-auto p-4">
       <h1 className="text-2xl font-bold mb-6">AutoUI React Example</h1>
-      
-      
-      {/* The AutoUI component */}
+      {/* 
+        Set mockMode={false} to use a real LLM (requires OpenAI API key in your environment).
+        Set mockMode={true} to use local mock data for development.
+      */}
       <div className="border rounded-lg p-4 bg-white dark:bg-gray-800 dark:border-gray-700 min-h-[500px]">
+        {/* 
+          IMPORTANT: To use the real LLM (mockMode={false}), you need an OpenAI API key.
+          1. Create a file named `.env.local` in the `examples/basic-demo` directory.
+          2. Add your API key to this file like so:
+             NEXT_PUBLIC_OPENAI_API_KEY=YOUR_API_KEY_HERE
+          Replace YOUR_API_KEY_HERE with your actual key (e.g., sk-...).
+          The `NEXT_PUBLIC_` prefix is required by Next.js to expose the variable to the browser.
+        */}
         <AutoUI
+          // The schema prop defines the application's data structure (e.g., database tables).
+          // AutoUI uses this schema information when planning the UI with the LLM.
           schema={exampleSchema}
           goal="Create a task management dashboard with list view and ability to view task details"
-          mockMode={true}
-          debugMode={false}
+          mockMode={false}
+          openaiApiKey={process.env.NEXT_PUBLIC_OPENAI_API_KEY}
+          debugMode={true}
           componentAdapter="shadcn"
           userContext={{
             id: '1',

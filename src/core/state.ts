@@ -21,6 +21,7 @@ import { ActionRouter, ActionType, createDefaultRouter } from "./action-router";
 export interface UseUIStateEngineOptions {
   schema: Record<string, unknown>;
   goal: string;
+  openaiApiKey?: string | undefined;
   userContext?: Record<string, unknown> | undefined;
   mockMode?: boolean | undefined;
   planningConfig?:
@@ -43,6 +44,7 @@ export interface UseUIStateEngineOptions {
 export function useUIStateEngine({
   schema,
   goal,
+  openaiApiKey,
   userContext,
   mockMode = false,
   planningConfig,
@@ -103,7 +105,11 @@ export function useUIStateEngine({
               );
             } else {
               // systemEvents.emit for PLAN_PROMPT_CREATED is handled inside callPlannerLLM
-              resolvedNode = await callPlannerLLM(route.plannerInput, route);
+              resolvedNode = await callPlannerLLM(
+                route.plannerInput,
+                route,
+                openaiApiKey
+              );
             }
           } else {
             // Fallback if router.resolveRoute returns null (should not happen with default full refresh)
@@ -116,7 +122,7 @@ export function useUIStateEngine({
             if (mockMode) {
               resolvedNode = mockPlanner(input);
             } else {
-              resolvedNode = await callPlannerLLM(input);
+              resolvedNode = await callPlannerLLM(input, undefined, openaiApiKey);
             }
           }
         } else {
@@ -132,7 +138,7 @@ export function useUIStateEngine({
             resolvedNode = mockPlanner(input);
           } else {
             // buildPrompt is handled inside callPlannerLLM if no route.prompt is provided
-            resolvedNode = await callPlannerLLM(input);
+            resolvedNode = await callPlannerLLM(input, undefined, openaiApiKey);
           }
         }
 
@@ -180,6 +186,7 @@ export function useUIStateEngine({
       router,
       mockMode,
       dataContext,
+      openaiApiKey,
       enablePartialUpdates,
       dispatch, // Add dispatch
     ]
@@ -213,7 +220,7 @@ export function useUIStateEngine({
           // TODO: Consider emitting PLAN_COMPLETE for mock path if callPlannerLLM does it internally
         } else {
           // callPlannerLLM will emit PLAN_START, PLAN_PROMPT_CREATED, PLAN_COMPLETE/ERROR
-          node = await callPlannerLLM(input);
+          node = await callPlannerLLM(input, undefined, openaiApiKey);
         }
         dispatch({ type: "AI_RESPONSE", node });
       } catch (e) {
@@ -231,7 +238,7 @@ export function useUIStateEngine({
     };
     initialFetch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [goal, schema, userContext, mockMode, dispatch]); // Removed append, kept dispatch
+  }, [goal, schema, userContext, mockMode, dispatch, openaiApiKey]);
 
   return {
     state,

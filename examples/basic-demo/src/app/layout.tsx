@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 
+// This file sets up global styles and fonts for the demo app.
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {

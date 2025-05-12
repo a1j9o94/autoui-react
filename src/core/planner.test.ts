@@ -1,14 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  buildPrompt,
-  mockPlanner,
-  callPlannerLLM,
-  processEvent,
-} from "./planner";
+import { PlannerInput, UIEvent, UISpecNode } from "../schema/ui";
+// Restore static imports
+import { buildPrompt, mockPlanner, callPlannerLLM, processEvent } from "./planner";
 import { ActionRouter } from "./action-router";
-import { PlannerInput, UISpecNode, UIEvent } from "../schema/ui";
-
-// Don't mock the AI SDK's generateText function to make real calls
 
 // Mock the system events
 vi.mock("./system-events", () => ({
@@ -22,14 +16,6 @@ vi.mock("./system-events", () => ({
     PLAN_RESPONSE_CHUNK: "PLAN_RESPONSE_CHUNK",
     PLAN_COMPLETE: "PLAN_COMPLETE",
     PLAN_ERROR: "PLAN_ERROR",
-  },
-}));
-
-// Mock the environment for some tests to avoid actual LLM calls when not needed
-vi.mock("../env", () => ({
-  env: {
-    MOCK_PLANNER: "0",
-    OPENAI_API_KEY: process.env.VITE_OPENAI_API_KEY,
   },
 }));
 
@@ -131,9 +117,8 @@ describe("Planner", () => {
   });
 
   describe("callPlannerLLM", () => {
-    // Use mock planner for this test to isolate the functionality
-    it("should call the planner and emit events", async () => {
-      // Use mockPlanner directly without trying to mock env
+    it("should use mock planner when no API key is provided", async () => {
+      // Use the statically imported callPlannerLLM
       const input: PlannerInput = {
         schema: {},
         goal: "Test goal",
@@ -141,23 +126,27 @@ describe("Planner", () => {
         userContext: null,
       };
 
-      // Test the mock planner directly
-      const result = mockPlanner(input);
+      // Call the statically imported function without providing an API key.
+      // The internal logic of callPlannerLLM should now handle this and return the mock.
+      const result = await callPlannerLLM(input, undefined, undefined);
 
       // Verify the mock result
       expect(result).toBeDefined();
       expect(result.id).toBe("root");
       expect(result.node_type).toBe("Container");
-      expect(result.children).toHaveLength(2); // Updated expectation
+      expect(result.children).toHaveLength(2);
     });
+
+    // Add a test case for MOCK_PLANNER env var if desired (optional)
+    // it("should use mock planner when MOCK_PLANNER env var is set", async () => { ... });
   });
 
-  // Conditionally run real LLM tests only if OPENAI_API_KEY is present
+  // Integration test still passes the key explicitly
   (process.env.VITE_OPENAI_API_KEY ? describe : describe.skip)(
     "Integration with real LLM",
     () => {
       it("should generate UI with a real LLM call", async () => {
-        // Simple input to ensure successful parsing
+        // Use statically imported callPlannerLLM
         const input: PlannerInput = {
           schema: {
             todos: {
@@ -170,12 +159,9 @@ describe("Planner", () => {
           history: null,
           userContext: null,
         };
-
-        // Use a try/catch to log any errors helpfully
         try {
-          const result = await callPlannerLLM(input);
-
-          // Just check we have a valid structure
+          // Pass the key directly
+          const result = await callPlannerLLM(input, undefined, process.env.VITE_OPENAI_API_KEY);
           expect(result).toBeDefined();
           expect(result.id).toBeDefined();
           expect(result.node_type).toBeDefined();
@@ -187,22 +173,19 @@ describe("Planner", () => {
     }
   );
 
+  // processEvent test
   describe("processEvent", () => {
     it("should throw an error when no route is found", async () => {
-      // Create a router with no routes that will return null
+      // Use statically imported processEvent
       const emptyRouter = new ActionRouter();
-
-      // Spy on resolveRoute to make it return null
       const resolveRouteSpy = vi.spyOn(emptyRouter, "resolveRoute");
       resolveRouteSpy.mockReturnValue(null);
-
       const event: UIEvent = {
         type: "CLICK",
         nodeId: "button",
         timestamp: Date.now(),
         payload: null,
       };
-
       const layout: UISpecNode = {
         id: "root",
         node_type: "Container",
@@ -212,9 +195,9 @@ describe("Planner", () => {
         children: null,
       };
 
-      // Test that processEvent throws an error when resolveRoute returns null
       await expect(
-        processEvent(event, emptyRouter, {}, layout, {}, "Test goal")
+        // Pass undefined for API key, processEvent passes it down
+        processEvent(event, emptyRouter, {}, layout, {}, "Test goal", undefined, undefined)
       ).rejects.toThrow("No route found for event");
     });
   });

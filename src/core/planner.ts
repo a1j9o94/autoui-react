@@ -10,10 +10,13 @@ import { env } from "../env";
 import { ActionRouter, RouteResolution } from "./action-router";
 import { DataContext } from "./bindings";
 
-// Create a strictly compatible OpenAI provider for structured outputs
-const strictOpenAI = createOpenAI({
-  compatibility: "strict", // Required for structured outputs with OpenAI API
-});
+// Helper function to create the OpenAI client REQUIRES an API key
+const getOpenAIClient = (apiKey: string) => {
+  return createOpenAI({
+    apiKey: apiKey, // Use the provided key directly
+    compatibility: "strict",
+  });
+};
 
 /**
  * Builds the prompt for the LLM planner
@@ -270,43 +273,52 @@ export function mockPlanner(
  * Calls the LLM planner to generate a UI specification
  * @param input - Planner input
  * @param routeResolution - Optional route resolution for partial updates
+ * @param openaiApiKey - Optional OpenAI API key
  * @returns Promise resolving to a UISpecNode
  */
 export async function callPlannerLLM(
   input: PlannerInput,
-  routeResolution?: RouteResolution
+  routeResolution?: RouteResolution,
+  openaiApiKey?: string
 ): Promise<UISpecNode> {
-  // console.log("🚀 callPlannerLLM called with input:", input);
-  // console.log("🚀 Environment variables:", {
-  //   MOCK_PLANNER: env.MOCK_PLANNER,
-  //   OPENAI_API_KEY: env.OPENAI_API_KEY ? "Available" : "Not available",
-  // });
-  // console.log("🔍 Debugging env in planner.ts:");
-  // console.log("  env.MOCK_PLANNER actual value:", env.MOCK_PLANNER);
-  // console.log("  env.OPENAI_API_KEY actual value:", env.OPENAI_API_KEY);
-  // console.log("  Is env.OPENAI_API_KEY truthy?:", !!env.OPENAI_API_KEY);
-  // console.log(
-  //   "  Condition for mock (env.MOCK_PLANNER === '1'):",
-  //   env.MOCK_PLANNER === "1"
-  // );
-  // console.log(
-  //   "  Condition for mock (!env.OPENAI_API_KEY):",
-  //   !env.OPENAI_API_KEY
-  // );
-  // console.log(
-  //   "  Combined condition for mock (mock enabled || key missing):",
-  //   env.MOCK_PLANNER === "1" || !env.OPENAI_API_KEY
-  // );
+  console.log("🚀 callPlannerLLM called with input:", input);
+  console.log("🚀 Environment variables:", {
+    MOCK_PLANNER: env.MOCK_PLANNER,
+    OPENAI_API_KEY: env.OPENAI_API_KEY ? "Available" : "Not available",
+    passedApiKey: openaiApiKey ? "Available" : "Not available",
+  });
+  console.log("🔍 Debugging env in planner.ts:");
+  console.log("  env.MOCK_PLANNER actual value:", env.MOCK_PLANNER);
+  console.log("  env.OPENAI_API_KEY actual value:", env.OPENAI_API_KEY);
+  console.log(
+    "  Condition for mock (env.MOCK_PLANNER === '1'):",
+    env.MOCK_PLANNER === "1"
+  );
+  console.log(
+    "  Condition for mock (!env.OPENAI_API_KEY):",
+    !(openaiApiKey || env.OPENAI_API_KEY)
+  );
+  console.log(
+    "  Combined condition for mock (mock enabled || key missing):",
+    env.MOCK_PLANNER === "1" || !(openaiApiKey || env.OPENAI_API_KEY)
+  );
 
-  // Emit planning start event
   await systemEvents.emit(
     createSystemEvent(SystemEventType.PLAN_START, { plannerInput: input })
   );
 
-  // Use mock planner if environment variable is set
-  if (env.MOCK_PLANNER === "1" || !env.OPENAI_API_KEY) {
+  // Use mock planner if MOCK_PLANNER env var is set
+  if (env.MOCK_PLANNER === "1") {
     console.warn(
-      "Using mock planner because MOCK_PLANNER is enabled or OPENAI_API_KEY is not available"
+      `Using mock planner because MOCK_PLANNER environment variable is set to "1".`
+    );
+    return mockPlanner(input);
+  }
+
+  // If not using mock planner via env var, API key is required for real LLM call
+  if (!openaiApiKey) {
+    console.warn(
+      `OpenAI API key was not provided to callPlannerLLM. Falling back to mock planner.`
     );
     return mockPlanner(input);
   }
@@ -324,7 +336,7 @@ export async function callPlannerLLM(
   try {
     // Use AI SDK's generateObject with structured outputs
     const { object: uiSpec } = await generateObject({
-      model: strictOpenAI("gpt-4o", { structuredOutputs: true }),
+      model: getOpenAIClient(openaiApiKey)("gpt-4o", { structuredOutputs: true }),
       schema: openAIUISpec,
       messages: [{ role: "user", content: prompt }],
       temperature: 0.2,
@@ -363,6 +375,7 @@ export async function callPlannerLLM(
  * @param dataContext - Current data context
  * @param goal - The user's goal
  * @param userContext - Optional user context
+ * @param openaiApiKey - Optional OpenAI API key
  * @returns Promise resolving to a UI spec node
  */
 export async function processEvent(
@@ -372,7 +385,8 @@ export async function processEvent(
   layout: UISpecNode | undefined,
   dataContext: DataContext,
   goal: string,
-  userContext?: Record<string, unknown>
+  userContext?: Record<string, unknown>,
+  openaiApiKey?: string
 ): Promise<UISpecNode> {
   // const startTime = Date.now(); // Commented out as it's currently unused
 
@@ -405,7 +419,11 @@ export async function processEvent(
   }
 
   const plannerInputForLLM: PlannerInput = routeResolution.plannerInput;
-  const newLayout = await callPlannerLLM(plannerInputForLLM, routeResolution);
+  const newLayout = await callPlannerLLM(
+    plannerInputForLLM,
+    routeResolution,
+    openaiApiKey
+  );
 
   // Temporarily comment out SystemEvent calls
   // await systemEvents.emit(

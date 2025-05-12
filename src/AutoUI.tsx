@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { UIEvent, UISpecNode, UIEventType, DataItem } from "./schema/ui";
-import { useUIStateEngine } from "./core/state";
+import { useUIStateEngine, UseUIStateEngineOptions } from "./core/state";
 import { renderNode, renderShimmer } from "./core/renderer";
 import { resolveBindings, DataContext, executeAction } from "./core/bindings";
 import { EventManager, EventHook } from "./core/events";
@@ -22,7 +22,8 @@ interface DrizzleAdapterOptions {
   // Add other options as needed
 }
 
-export interface AutoUIProps {
+export interface AutoUIProps extends Omit<UseUIStateEngineOptions, 'router' | 'dataContext'> {
+  // Extend options from the state engine, excluding ones managed internally
   // Schema definition (one of these is required)
   schema:
     | Record<string, unknown> // Direct schema object
@@ -129,7 +130,7 @@ export const AutoUI: React.FC<AutoUIProps> = ({
   eventHooks,
   systemEventHooks,
   debugMode = false,
-  mockMode = true,
+  mockMode = false,
   planningConfig,
   integration = {},
   scope = {},

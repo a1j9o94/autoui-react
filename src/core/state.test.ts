@@ -178,7 +178,9 @@ describe("useUIStateEngine", () => {
         expect.objectContaining({
           goal: defaultOptions.goal,
           history: [],
-        })
+        }),
+        undefined,
+        undefined
       );
       // expect(dispatchSpy).toHaveBeenCalledWith({
       //   type: "AI_RESPONSE",
@@ -311,7 +313,9 @@ describe("useUIStateEngine", () => {
           expect.objectContaining({
             goal: defaultOptions.goal,
             history: expect.arrayContaining([testEvent]),
-          })
+          }),
+          undefined,
+          undefined
         );
         // expect(dispatchSpy).toHaveBeenCalledWith({ type: "AI_RESPONSE", node: successNode });
         // expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: false });
@@ -361,7 +365,8 @@ describe("useUIStateEngine", () => {
         expect(mockResolveRoute).toHaveBeenCalled();
         expect(mockCallPlannerLLM).toHaveBeenCalledWith(
           partialUpdateRouteResult.plannerInput,
-          partialUpdateRouteResult
+          partialUpdateRouteResult,
+          undefined
         );
         // expect(dispatchSpy).toHaveBeenCalledWith({ type: "PARTIAL_UPDATE", nodeId: partialUpdateRouteResult.targetNodeId, node: successNode });
         expect(result.current.state.error).toBeNull();
@@ -386,7 +391,8 @@ describe("useUIStateEngine", () => {
 
         expect(mockCallPlannerLLM).toHaveBeenCalledWith(
           partialUpdateRouteResult.plannerInput,
-          partialUpdateRouteResult
+          partialUpdateRouteResult,
+          undefined
         );
         // expect(dispatchSpy).toHaveBeenCalledWith({ type: "ERROR", message: errorMessage });
         expect(result.current.state.error).toBe(errorMessage);
