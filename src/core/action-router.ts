@@ -223,6 +223,20 @@ export class ActionRouter {
     const sourceNode = layout ? findNodeById(layout, event.nodeId) : undefined;
     const nodeConfig = sourceNode?.events?.[event.type];
 
+    // ADD THIS LOG: Enhanced debugging for sourceNode and nodeConfig
+    console.log(
+      `[ActionRouter Debug] Event: ${event.type} on ${
+        event.nodeId
+      }. Source node found: ${!!sourceNode}.`,
+      sourceNode
+        ? `Source Node ID: ${sourceNode.id}, Type: ${sourceNode.node_type}`
+        : "Node not found in layout.",
+      sourceNode
+        ? `Source Node Events: ${JSON.stringify(sourceNode.events, null, 2)}`
+        : "",
+      `Derived nodeConfig: ${JSON.stringify(nodeConfig, null, 2)}`
+    );
+
     let actionType: ActionType;
     let determinedTargetNodeId: string;
     let promptTemplate: string | undefined = undefined;

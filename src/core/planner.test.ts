@@ -1,10 +1,13 @@
 /// <reference types="vitest/globals" />
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { SpyInstance } from "vitest";
 import { PlannerInput, UIEvent, UISpecNode } from "../schema/ui";
+import { UIEventType } from "./action-types";
+import { ActionType } from "./action-router";
 // Restore static imports
 import { mockPlanner, callPlannerLLM, processEvent } from "./planner";
 import { ActionRouter } from "./action-router";
-import { ActionType, RouteResolution } from "./action-router";
+import { RouteResolution } from "./action-router";
 import { buildPrompt } from "./action-router";
 
 // Mock the system events
@@ -24,7 +27,7 @@ vi.mock("./system-events", () => ({
 
 describe("Planner", () => {
   // Spy on console.error to suppress and check error logging
-  let consoleErrorSpy: vi.SpyInstance<
+  let consoleErrorSpy: SpyInstance<
     [message?: unknown, ...optionalParams: unknown[]],
     void
   >;
@@ -248,9 +251,9 @@ describe("Planner", () => {
       // Use statically imported processEvent
       const emptyRouter = new ActionRouter();
       const resolveRouteSpy = vi.spyOn(emptyRouter, "resolveRoute");
-      resolveRouteSpy.mockReturnValue(null);
+      resolveRouteSpy.mockReturnValue(null as unknown as RouteResolution);
       const event: UIEvent = {
-        type: "CLICK",
+        type: UIEventType.CLICK,
         nodeId: "button",
         timestamp: Date.now(),
         payload: null,
