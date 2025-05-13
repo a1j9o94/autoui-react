@@ -203,7 +203,9 @@ describe("Planner", () => {
 
       it("should generate interactive elements like buttons", async () => {
         const input: PlannerInput = {
-          schema: { userAction: { type: "string", description: "Action to perform" } },
+          schema: {
+            userAction: { type: "string", description: "Action to perform" },
+          },
           goal: "Create a button labeled 'Submit Action' that allows a user to submit an action.",
           history: null,
           userContext: null,

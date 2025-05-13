@@ -144,6 +144,8 @@ export enum ActionType {
   ADD_DROPDOWN = "ADD_DROPDOWN", // Add a dropdown to a specific node
   SHOW_DETAIL = "SHOW_DETAIL", // Show a detail view
   HIDE_DETAIL = "HIDE_DETAIL", // Hide a detail view
+  HIDE_DIALOG = "HIDE_DIALOG", // Explicitly add HIDE_DIALOG
+  SAVE_TASK_CHANGES = "SAVE_TASK_CHANGES", // Add action for saving
   TOGGLE_STATE = "TOGGLE_STATE", // Toggle a boolean state (expanded, selected, etc.)
   UPDATE_FORM = "UPDATE_FORM", // Update a form based on selections
   NAVIGATE = "NAVIGATE", // Navigate to a different view
@@ -198,12 +200,25 @@ export class ActionRouter {
     );
     // ADD THIS LOG: Be very specific about what part of the layout to log to avoid excessively large logs.
     // We are interested in the children of the taskListView node, if it exists and has children.
-    const taskListViewNode = layout?.children?.find(c => c.id === 'taskListView' || c.id === 'task-list-view');
+    const taskListViewNode = layout?.children?.find(
+      (c) => c.id === "taskListView" || c.id === "task-list-view"
+    );
     let taskListViewChildrenSnapshot = null;
     if (taskListViewNode && taskListViewNode.children) {
-      taskListViewChildrenSnapshot = taskListViewNode.children.map(child => ({ id: child.id, children: child.children?.map(grandChild => ({id: grandChild.id, props: grandChild.props, bindings: grandChild.bindings, events: grandChild.events })) })); // Include grandchildren details
+      taskListViewChildrenSnapshot = taskListViewNode.children.map((child) => ({
+        id: child.id,
+        children: child.children?.map((grandChild) => ({
+          id: grandChild.id,
+          props: grandChild.props,
+          bindings: grandChild.bindings,
+          events: grandChild.events,
+        })),
+      })); // Include grandchildren details
     }
-    console.log(`[ActionRouter Debug] Searching for nodeId: ${event.nodeId} in taskListView children (snapshot):`, JSON.stringify(taskListViewChildrenSnapshot, null, 2));
+    console.log(
+      `[ActionRouter Debug] Searching for nodeId: ${event.nodeId} in taskListView children (snapshot):`,
+      JSON.stringify(taskListViewChildrenSnapshot, null, 2)
+    );
 
     const sourceNode = layout ? findNodeById(layout, event.nodeId) : undefined;
     const nodeConfig = sourceNode?.events?.[event.type];
@@ -218,21 +233,37 @@ export class ActionRouter {
     if (nodeConfig?.action) {
       actionType = nodeConfig.action as ActionType;
       determinedTargetNodeId = nodeConfig.target || sourceNode?.id || "root";
-      determinedNodeConfigPayload = nodeConfig.payload ? { ...nodeConfig.payload } : null;
+      determinedNodeConfigPayload = nodeConfig.payload
+        ? { ...nodeConfig.payload }
+        : null;
 
       // Ensure SHOW_DIALOG from event config is mapped to ActionType.SHOW_DETAIL for routing logic
-      if (nodeConfig.action === "SHOW_DIALOG") { 
+      if (nodeConfig.action === "SHOW_DIALOG") {
         actionType = ActionType.SHOW_DETAIL;
+      } else if (nodeConfig.action === "HIDE_DIALOG") {
+        actionType = ActionType.HIDE_DIALOG; // Ensure this is correctly typed
+      } else if (nodeConfig.action === "SAVE_TASK_CHANGES") {
+        actionType = ActionType.SAVE_TASK_CHANGES;
       }
 
       if (actionType === ActionType.SHOW_DETAIL) {
         // Ensure template refers to selectedTask which is set by executeAction("SHOW_DIALOG",...)
-        promptTemplate = "Action: ${actionType}. Show detail for ${nodeId} (source of event) which targets dialog ${targetNodeId}. Selected Task ID: ${selectedTask_id}";
+        promptTemplate =
+          "Action: ${actionType}. Show detail for ${nodeId} (source of event) which targets dialog ${targetNodeId}. Selected Task ID: ${selectedTask_id}. Current task details are in selectedTask. Generate the UI for the dialog content based on these details.";
         contextKeys = ["selectedTask"]; // Ensure this matches what executeAction sets
+      } else if (actionType === ActionType.HIDE_DIALOG) {
+        promptTemplate =
+          "Action: ${actionType}. User wants to hide dialog ${targetNodeId}. Respond with an updated UI spec for the dialog node '${targetNodeId}' where its visibility is set to false (e.g., by setting its 'visible' prop to false).";
+      } else if (actionType === ActionType.SAVE_TASK_CHANGES) {
+        promptTemplate =
+          "Action: ${actionType}. User clicked save for task ID ${eventPayload_taskId} (or selectedTask.id if available). Current details are in selectedTask. Update task data. The dialog ${targetNodeId} should then be hidden. Refresh the main task list.";
+        contextKeys = ["selectedTask", "tasks"]; // Provide relevant context
       } else if (actionType === ActionType.NAVIGATE) {
-        promptTemplate = "Action: ${actionType}. Navigate from ${nodeId} to view: ${targetNodeId}";
+        promptTemplate =
+          "Action: ${actionType}. Navigate from ${nodeId} to view: ${targetNodeId}";
       } else {
-        promptTemplate = "Action: ${actionType}. Event ${eventType} on node ${nodeId}. Target: ${targetNodeId}. Goal: ${goal}";
+        promptTemplate =
+          "Action: ${actionType}. Event ${eventType} on node ${nodeId}. Target: ${targetNodeId}. Goal: ${goal}";
       }
     } else {
       // Default behaviors if no specific nodeConfig.action
@@ -240,32 +271,43 @@ export class ActionRouter {
         case "INIT":
           actionType = ActionType.FULL_REFRESH;
           determinedTargetNodeId = "root";
-          promptTemplate = "Action: ${actionType}. Initialize the application view for the goal: ${goal}";
+          promptTemplate =
+            "Action: ${actionType}. Initialize the application view for the goal: ${goal}";
           break;
         case "CLICK":
           actionType = ActionType.FULL_REFRESH;
           determinedTargetNodeId = "root"; // Default for unconfigured clicks (button or otherwise)
           if (sourceNode?.node_type === "Button") {
-            promptTemplate = "Action: ${actionType}. Button ${nodeId} clicked. Goal: ${goal}";
+            promptTemplate =
+              "Action: ${actionType}. Button ${nodeId} clicked. Goal: ${goal}";
           } else {
-            promptTemplate = "Action: ${actionType}. Generic click on ${nodeId}. Goal: ${goal}";
+            promptTemplate =
+              "Action: ${actionType}. Generic click on ${nodeId}. Goal: ${goal}";
           }
           break;
         case "CHANGE":
-          if (sourceNode && ["Input", "Select", "Textarea", "Checkbox", "RadioGroup"].includes(sourceNode.node_type)) {
+          if (
+            sourceNode &&
+            ["Input", "Select", "Textarea", "Checkbox", "RadioGroup"].includes(
+              sourceNode.node_type
+            )
+          ) {
             actionType = ActionType.UPDATE_DATA;
-            determinedTargetNodeId = sourceNode.id; 
-            promptTemplate = "Action: ${actionType}. Update data for ${nodeId} due to change. New value: ${eventPayload_value}. Goal: ${goal}";
+            determinedTargetNodeId = sourceNode.id;
+            promptTemplate =
+              "Action: ${actionType}. Update data for ${nodeId} due to change. New value: ${eventPayload_value}. Goal: ${goal}";
           } else {
             actionType = ActionType.FULL_REFRESH;
             determinedTargetNodeId = "root";
-            promptTemplate = "Action: ${actionType}. Change event on ${nodeId}. Goal: ${goal}";
+            promptTemplate =
+              "Action: ${actionType}. Change event on ${nodeId}. Goal: ${goal}";
           }
           break;
         default:
           actionType = ActionType.FULL_REFRESH;
           determinedTargetNodeId = "root";
-          promptTemplate = "Action: ${actionType}. Unhandled event ${eventType} on ${nodeId}. Goal: ${goal}";
+          promptTemplate =
+            "Action: ${actionType}. Unhandled event ${eventType} on ${nodeId}. Goal: ${goal}";
           console.warn(
             `[ActionRouter] Unhandled event type: ${event.type} for node ${event.nodeId}, falling back to FULL_REFRESH.`
           );
@@ -279,7 +321,9 @@ export class ActionRouter {
       additionalContext.sourceNode = sourceNode;
     }
     // Determine and add targetNode to context if found
-    const targetNode = layout ? findNodeById(layout, determinedTargetNodeId) : undefined;
+    const targetNode = layout
+      ? findNodeById(layout, determinedTargetNodeId)
+      : undefined;
     if (targetNode) {
       additionalContext.targetNode = targetNode;
     }
@@ -298,15 +342,22 @@ export class ActionRouter {
       finalEventPayload = { ...event.payload };
     }
     if (determinedNodeConfigPayload) {
-      finalEventPayload = { ...(finalEventPayload || {}), ...determinedNodeConfigPayload };
+      finalEventPayload = {
+        ...(finalEventPayload || {}),
+        ...determinedNodeConfigPayload,
+      };
     }
     // Set eventPayload in additionalContext: null if both inputs were null/empty, otherwise the merged object.
     if (finalEventPayload) {
       additionalContext.eventPayload = finalEventPayload;
-    } else if (event.payload === null && (determinedNodeConfigPayload === null || Object.keys(determinedNodeConfigPayload).length === 0) ) {
+    } else if (
+      event.payload === null &&
+      (determinedNodeConfigPayload === null ||
+        Object.keys(determinedNodeConfigPayload).length === 0)
+    ) {
       additionalContext.eventPayload = null;
     }
-    // If both event.payload and determinedNodeConfigPayload were undefined or empty objects, 
+    // If both event.payload and determinedNodeConfigPayload were undefined or empty objects,
     // finalEventPayload would be null or {}, and additionalContext.eventPayload would not be set by the above,
     // which is fine as it means no payload.
 
@@ -323,27 +374,38 @@ export class ActionRouter {
     const templateValues: Record<string, unknown> = {
       goal,
       eventType: event.type,
-      nodeId: event.nodeId, 
+      nodeId: event.nodeId,
       targetNodeId: determinedTargetNodeId, // Use the consistently determined targetNodeId
       actionType: actionType.toString(),
       ...(userContext || {}),
       ...additionalContext,
     };
-    
-    if (typeof additionalContext.eventPayload === 'object' && additionalContext.eventPayload !== null) {
-        for (const [key, value] of Object.entries(additionalContext.eventPayload)) {
-            templateValues[`eventPayload_${key}`] = value;
-        }
+
+    if (
+      typeof additionalContext.eventPayload === "object" &&
+      additionalContext.eventPayload !== null
+    ) {
+      for (const [key, value] of Object.entries(
+        additionalContext.eventPayload
+      )) {
+        templateValues[`eventPayload_${key}`] = value;
+      }
     }
-    if (additionalContext.selectedItem && typeof additionalContext.selectedItem === 'object' && additionalContext.selectedItem !== null) {
-        for (const [key, value] of Object.entries(additionalContext.selectedItem)) {
-            templateValues[`selectedItem_${key}`] = value; 
-        }
+    if (
+      additionalContext.selectedItem &&
+      typeof additionalContext.selectedItem === "object" &&
+      additionalContext.selectedItem !== null
+    ) {
+      for (const [key, value] of Object.entries(
+        additionalContext.selectedItem
+      )) {
+        templateValues[`selectedItem_${key}`] = value;
+      }
     }
-    
+
     const finalPrompt = buildPrompt(
       plannerInput,
-      promptTemplate, 
+      promptTemplate,
       templateValues
     );
 

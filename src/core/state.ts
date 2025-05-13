@@ -2,12 +2,7 @@ import { useReducer, useCallback, useEffect, useRef } from "react";
 // Mock useChat hook for development
 // const useChat = (config: any) => { ... };
 
-import {
-  UIEvent,
-  UISpecNode,
-  PlannerInput,
-  UIState,
-} from "../schema/ui";
+import { UIEvent, UISpecNode, PlannerInput, UIState } from "../schema/ui";
 import { uiReducer, initialState } from "./reducer";
 import { mockPlanner, callPlannerLLM } from "./planner"; // Added callPlannerLLM
 import {
@@ -71,7 +66,11 @@ export function useUIStateEngine({
 
   // Function to handle UI events with routing
   const handleEvent = useCallback(
-    async (event: UIEvent, currentResolvedLayout?: UISpecNode | null, updatedDataContext?: DataContext) => {
+    async (
+      event: UIEvent,
+      currentResolvedLayout?: UISpecNode | null,
+      updatedDataContext?: DataContext
+    ) => {
       dispatch({ type: "UI_EVENT", event });
       dispatch({ type: "LOADING", isLoading: true });
 
@@ -80,12 +79,19 @@ export function useUIStateEngine({
         let actionTypeForDispatch: ActionType = ActionType.FULL_REFRESH;
         let targetNodeIdForDispatch: string = "root";
 
-        const layoutForRouting = currentResolvedLayout || stateRef.current.layout;
+        const layoutForRouting =
+          currentResolvedLayout || stateRef.current.layout;
         const contextForRouting = updatedDataContext || dataContext;
 
         // ADD LOGS BEFORE AND AFTER router.resolveRoute
-        console.log("[state.ts handleEvent] About to call router.resolveRoute. enablePartialUpdates:", enablePartialUpdates);
-        console.log("[state.ts handleEvent] layoutForRouting ID (if exists):", layoutForRouting?.id);
+        console.log(
+          "[state.ts handleEvent] About to call router.resolveRoute. enablePartialUpdates:",
+          enablePartialUpdates
+        );
+        console.log(
+          "[state.ts handleEvent] layoutForRouting ID (if exists):",
+          layoutForRouting?.id
+        );
         // console.log("[state.ts handleEvent] contextForRouting:", JSON.stringify(contextForRouting, null, 2)); // Can be large
 
         if (enablePartialUpdates) {
@@ -99,7 +105,10 @@ export function useUIStateEngine({
           );
 
           // ADD THIS LOG STRATEGICALLY
-          console.log("[state.ts handleEvent] router.resolveRoute returned:", route);
+          console.log(
+            "[state.ts handleEvent] router.resolveRoute returned:",
+            route
+          );
 
           if (route) {
             console.log("Resolved route:", route);
@@ -164,7 +173,6 @@ export function useUIStateEngine({
         switch (actionTypeForDispatch) {
           case ActionType.UPDATE_NODE:
           case ActionType.SHOW_DETAIL:
-          case ActionType.HIDE_DETAIL:
           case ActionType.TOGGLE_STATE:
           case ActionType.ADD_DROPDOWN:
           case ActionType.UPDATE_FORM:
@@ -174,6 +182,16 @@ export function useUIStateEngine({
               nodeId: targetNodeIdForDispatch,
               node: resolvedNode,
             });
+            break;
+          case ActionType.HIDE_DIALOG:
+            dispatch({
+              type: "PARTIAL_UPDATE",
+              nodeId: targetNodeIdForDispatch,
+              node: resolvedNode,
+            });
+            break;
+          case ActionType.SAVE_TASK_CHANGES:
+            dispatch({ type: "AI_RESPONSE", node: resolvedNode });
             break;
           case ActionType.FULL_REFRESH:
           default:
@@ -258,9 +276,9 @@ export function useUIStateEngine({
           );
 
           node = await callPlannerLLM(
-            route.plannerInput, 
+            route.plannerInput,
             openaiApiKey || "",
-            route 
+            route
           );
         }
         dispatch({ type: "AI_RESPONSE", node });

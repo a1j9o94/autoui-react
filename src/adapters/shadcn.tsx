@@ -797,11 +797,17 @@ export const adapterMap: Record<
   Dialog: (node, processEvent) => {
     // Determine if the dialog should be open. Check bindings first, then props.
     // Default to false if neither is specified.
-    const isOpen = getSafeBinding(node.bindings, "visible", isBoolean, // Check bindings.visible (planner output)
-                    getSafeProp(node.props, "open", isBoolean,          // Then props.open (if binding resolution put it there)
-                      getSafeProp(node.props, "visible", isBoolean, false) // Then props.visible (if binding resolution put it there under 'visible')
-                    )
-                  );
+    const isOpen = getSafeBinding(
+      node.bindings,
+      "visible",
+      isBoolean, // Check bindings.visible (planner output)
+      getSafeProp(
+        node.props,
+        "open",
+        isBoolean, // Then props.open (if binding resolution put it there)
+        getSafeProp(node.props, "visible", isBoolean, false) // Then props.visible (if binding resolution put it there under 'visible')
+      )
+    );
 
     // Extract key and className first. Intentionally exclude styleProp and open (_open)
     const {

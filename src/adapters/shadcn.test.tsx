@@ -496,9 +496,7 @@ describe("Shadcn Adapter - renderNode", () => {
       node_type: "ListView",
       props: {
         // This 'data' prop should be consumed by the adapter and NOT forwarded to the DOM
-        data: [
-          { id: "1", name: "Item 1" },
-        ],
+        data: [{ id: "1", name: "Item 1" }],
         className: "list-test-class",
       },
       children: [childNode],

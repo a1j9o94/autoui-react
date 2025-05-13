@@ -24,7 +24,8 @@ vi.mock("../adapters/shadcn", () => ({
         // console.warn("processEvent passed to mock renderShadcnNode in test for node:", node.id);
       }
       // Make mock render output dependent on props like 'label' or 'text' for testing purposes
-      const textContent = node.props?.label || node.props?.text || `Mock-${node.node_type}`;
+      const textContent =
+        node.props?.label || node.props?.text || `Mock-${node.node_type}`;
       return <div data-testid={node.id}>{textContent}</div>;
     }
   ),
@@ -198,13 +199,17 @@ describe("Renderer", () => {
         id: "shared-id-for-cache-test",
         node_type: "Button",
         props: { label: "Version 1" }, // Prop that affects rendering
-        bindings: null, events: null, children: null,
+        bindings: null,
+        events: null,
+        children: null,
       };
       const nodeV2: UISpecNode = {
         id: "shared-id-for-cache-test", // Same ID
         node_type: "Button",
         props: { label: "Version 2" }, // Different prop
-        bindings: null, events: null, children: null,
+        bindings: null,
+        events: null,
+        children: null,
       };
 
       // First call - this would populate the cache if it were active with old logic

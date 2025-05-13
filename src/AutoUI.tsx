@@ -367,23 +367,39 @@ export const AutoUI: React.FC<AutoUIProps> = ({
       if (onEvent) onEvent(event);
 
       if (!shouldProceed) {
-        console.info("[AutoUI.processEvent] Event processing stopped by hooks", event);
+        console.info(
+          "[AutoUI.processEvent] Event processing stopped by hooks",
+          event
+        );
         return;
       }
 
       console.log(`[AutoUI.processEvent] Event for nodeId: ${event.nodeId}`);
-      if (currentLayoutViaRef) { 
-        const taskListViewNode = currentLayoutViaRef.children?.find(c => c.id === 'taskListView' || c.id === 'task-list-view');
+      if (currentLayoutViaRef) {
+        const taskListViewNode = currentLayoutViaRef.children?.find(
+          (c) => c.id === "taskListView" || c.id === "task-list-view"
+        );
         let taskListViewChildrenSnapshot = null;
         if (taskListViewNode && taskListViewNode.children) {
-          taskListViewChildrenSnapshot = taskListViewNode.children.map(child => ({ 
-            id: child.id, 
-            children: child.children?.map(grandChild => ({id: grandChild.id, props: grandChild.props, events: grandChild.events})) 
-          }));
+          taskListViewChildrenSnapshot = taskListViewNode.children.map(
+            (child) => ({
+              id: child.id,
+              children: child.children?.map((grandChild) => ({
+                id: grandChild.id,
+                props: grandChild.props,
+                events: grandChild.events,
+              })),
+            })
+          );
         }
-        console.log(`[AutoUI.processEvent] Using currentLayoutViaRef snapshot (taskListView children):`, JSON.stringify(taskListViewChildrenSnapshot, null, 2));
+        console.log(
+          `[AutoUI.processEvent] Using currentLayoutViaRef snapshot (taskListView children):`,
+          JSON.stringify(taskListViewChildrenSnapshot, null, 2)
+        );
       } else {
-        console.warn(`[AutoUI.processEvent] currentLayoutViaRef is undefined when processing event: ${event.nodeId}.`);
+        console.warn(
+          `[AutoUI.processEvent] currentLayoutViaRef is undefined when processing event: ${event.nodeId}.`
+        );
         handleEvent(event, state.layout); // Fallback to state.layout from engine for the core handleEvent call
         return;
       }
@@ -405,7 +421,9 @@ export const AutoUI: React.FC<AutoUIProps> = ({
 
       const sourceNode = findNodeById(currentLayoutViaRef, event.nodeId);
       if (!sourceNode) {
-        console.warn(`[AutoUI.processEvent] Node not found for event: ${event.nodeId} in currentLayoutViaRef.`);
+        console.warn(
+          `[AutoUI.processEvent] Node not found for event: ${event.nodeId} in currentLayoutViaRef.`
+        );
         handleEvent(event, state.layout); // Fallback
         return;
       }
@@ -415,7 +433,7 @@ export const AutoUI: React.FC<AutoUIProps> = ({
         console.warn(
           `[AutoUI.processEvent] No event config found for ${event.type} on node ${event.nodeId}`
         );
-        handleEvent(event, currentLayoutViaRef); 
+        handleEvent(event, currentLayoutViaRef);
         return;
       }
 
@@ -427,10 +445,10 @@ export const AutoUI: React.FC<AutoUIProps> = ({
           ...event.payload,
         },
         dataContext,
-        currentLayoutViaRef 
+        currentLayoutViaRef
       );
       setDataContext(newContext);
-      handleEvent(event, currentLayoutViaRef, newContext); 
+      handleEvent(event, currentLayoutViaRef, newContext);
     },
     // Dependencies: handleEvent, onEvent, dataContext, eventManagerRef, state.layout (for fallback in handleEvent)
     // resolvedLayout (state) is NOT a direct dependency anymore due to the ref.
@@ -491,7 +509,9 @@ export const AutoUI: React.FC<AutoUIProps> = ({
         setRenderedNode(rendered);
       } catch (err) {
         console.error("Error rendering node:", err);
-        setRenderedNode(<div className="autoui-error">Error rendering UI. Check console.</div>); // Show error in UI
+        setRenderedNode(
+          <div className="autoui-error">Error rendering UI. Check console.</div>
+        ); // Show error in UI
       }
     } else {
       setRenderedNode(null);

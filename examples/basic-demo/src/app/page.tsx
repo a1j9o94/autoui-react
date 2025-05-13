@@ -119,7 +119,6 @@ export default function Home() {
           // AutoUI uses this schema information when planning the UI with the LLM.
           schema={exampleSchema}
           goal="Create a task management dashboard with list view and ability to view task details, and modify task details and status"
-          mockMode={false}
           openaiApiKey={process.env.NEXT_PUBLIC_OPENAI_API_KEY}
           debugMode={true}
           componentAdapter="shadcn"

@@ -316,27 +316,35 @@ export async function resolveBindings(
 
   // Helper function to recursively make all child IDs within an instance unique
   // Moved here to satisfy linter and define it once per resolveBindings call for a list parent
-  function makeChildIdsUniqueInInstance(parentNode: UISpecNode, baseInstanceId: string, originalTemplateRootId: string) {
+  function makeChildIdsUniqueInInstance(
+    parentNode: UISpecNode,
+    baseInstanceId: string,
+    originalTemplateRootId: string
+  ) {
     if (parentNode.children) {
-      parentNode.children = parentNode.children.map(child => {
+      parentNode.children = parentNode.children.map((child) => {
         // Attempt to get the original ID part, removing any previously prefixed instance ID
         let originalChildId = child.id;
         // This check is a bit heuristic; assumes original IDs don't naturally contain the template root ID with a dash.
         // A more robust way might involve storing original IDs separately if this becomes problematic.
-        if (child.id.startsWith(originalTemplateRootId + '-')) {
-            const parts = child.id.split('-');
-            if (parts.length > 1) {
-                 // Takes the last part assuming it's the original specific ID part if multiple hyphens exist from prior processing
-                originalChildId = parts[parts.length -1];
-            }
+        if (child.id.startsWith(originalTemplateRootId + "-")) {
+          const parts = child.id.split("-");
+          if (parts.length > 1) {
+            // Takes the last part assuming it's the original specific ID part if multiple hyphens exist from prior processing
+            originalChildId = parts[parts.length - 1];
+          }
         }
-        
+
         const newChildId = `${baseInstanceId}-${originalChildId}`;
         const newChild = {
-            ...JSON.parse(JSON.stringify(child)), // Deep clone child
-            id: newChildId
+          ...JSON.parse(JSON.stringify(child)), // Deep clone child
+          id: newChildId,
         };
-        makeChildIdsUniqueInInstance(newChild, baseInstanceId, originalTemplateRootId); // Recurse with the same baseInstanceId
+        makeChildIdsUniqueInInstance(
+          newChild,
+          baseInstanceId,
+          originalTemplateRootId
+        ); // Recurse with the same baseInstanceId
         return newChild;
       });
     }
@@ -386,11 +394,30 @@ export async function resolveBindings(
 
   if (node.props) {
     for (const [key, value] of Object.entries(node.props)) {
-      if (!PROP_KEYS_TO_RESOLVE.has(key)) continue; // leave untouched
-      const resolvedValue = processBinding(value, context, itemData);
-      if (resolvedValue !== undefined && resolvedValue !== value) {
-        if (!mergedProps) mergedProps = {};
-        mergedProps[key] = resolvedValue;
+      if (!mergedProps) mergedProps = {}; // Ensure mergedProps is initialized here
+
+      if (PROP_KEYS_TO_RESOLVE.has(key)) {
+        const resolvedPropValue = processBinding(value, context, itemData);
+        if (resolvedPropValue !== undefined) {
+          mergedProps[key] = resolvedPropValue;
+        } else {
+          // If a prop in PROP_KEYS_TO_RESOLVE was a path/template that resolved to undefined,
+          // set it to an empty string. Otherwise, preserve its original literal value.
+          if (
+            typeof value === "string" &&
+            (value.includes("{{") || value.includes("."))
+          ) {
+            mergedProps[key] = ""; // It was a path/template, make it empty
+          } else {
+            mergedProps[key] = value; // It was a literal or something else, preserve original node.props value if binding failed/absent for this key
+          }
+        }
+      } else if (value !== undefined) {
+        // For props not in PROP_KEYS_TO_RESOLVE, carry them over if they are defined.
+        mergedProps[key] = value;
+      } else {
+        // If original prop value was undefined, ensure it's not on mergedProps unless explicitly set later by bindings
+        delete mergedProps[key];
       }
     }
   }
@@ -415,11 +442,10 @@ export async function resolveBindings(
       processedEvents[eventType] = {
         ...eventConfig,
         payload: eventConfig.payload
-          ? (processBinding(
-              eventConfig.payload,
-              context,
-              itemData
-            ) as Record<string, unknown> | null)
+          ? (processBinding(eventConfig.payload, context, itemData) as Record<
+              string,
+              unknown
+            > | null)
           : null,
       };
     }
@@ -467,7 +493,11 @@ export async function resolveBindings(
 
           // Recursively make all child IDs within this instance unique
           // Pass the original templateChild.id to help reconstruct original part of IDs if nested
-          makeChildIdsUniqueInInstance(childNodeInstance, instanceId, templateChild.id);
+          makeChildIdsUniqueInInstance(
+            childNodeInstance,
+            instanceId,
+            templateChild.id
+          );
 
           const resolvedChild = await resolveBindings(
             childNodeInstance,
@@ -560,7 +590,9 @@ export function executeAction(
       if (payload?.item) {
         newContext = setValueByPath(newContext, "selected", payload.item);
       } else {
-         console.warn(`[executeAction] VIEW_DETAIL requires payload with item property.`);
+        console.warn(
+          `[executeAction] VIEW_DETAIL requires payload with item property.`
+        );
       }
       // target might represent the node ID to make visible (handled by reducer/state engine)
       break;
@@ -571,25 +603,43 @@ export function executeAction(
         // Assuming context.tasks.data is the path to the array of tasks
         const tasksData = getValueByPath(context, "tasks.data");
         if (Array.isArray(tasksData)) {
-          const foundTask = (tasksData as DataItem[]).find(t => t.id === payload.taskId);
+          const foundTask = (tasksData as DataItem[]).find(
+            (t) => t.id === payload.taskId
+          );
           if (foundTask) {
             newContext = setValueByPath(newContext, "selectedTask", foundTask);
-            console.log(`[executeAction] SHOW_DIALOG: Set selectedTask to:`, foundTask);
+            console.log(
+              `[executeAction] SHOW_DIALOG: Set selectedTask to:`,
+              foundTask
+            );
           } else {
-            console.warn(`[executeAction] SHOW_DIALOG: Task with id "${payload.taskId}" not found in tasks.data.`);
+            console.warn(
+              `[executeAction] SHOW_DIALOG: Task with id "${payload.taskId}" not found in tasks.data.`
+            );
             newContext = setValueByPath(newContext, "selectedTask", null); // Clear if not found
           }
         } else {
-          console.warn(`[executeAction] SHOW_DIALOG: context.tasks.data is not an array or not found.`);
+          console.warn(
+            `[executeAction] SHOW_DIALOG: context.tasks.data is not an array or not found.`
+          );
           newContext = setValueByPath(newContext, "selectedTask", null);
         }
       } else {
-        console.warn(`[executeAction] SHOW_DIALOG: payload.taskId or target was missing.`);
+        console.warn(
+          `[executeAction] SHOW_DIALOG: payload.taskId or target was missing.`
+        );
         // If no taskId, we might still want to make a generic dialog visible without specific data
         // but for now, we primarily link it to selecting an item.
       }
-      newContext = setValueByPath(newContext, "isTaskDetailDialogVisible", true);
-      console.log(`[executeAction] SHOW_DIALOG: set isTaskDetailDialogVisible to true. Dialog target: ${target}, Payload:`, payload);
+      newContext = setValueByPath(
+        newContext,
+        "isTaskDetailDialogVisible",
+        true
+      );
+      console.log(
+        `[executeAction] SHOW_DIALOG: set isTaskDetailDialogVisible to true. Dialog target: ${target}, Payload:`,
+        payload
+      );
       break;
     }
 
@@ -597,81 +647,151 @@ export function executeAction(
       // This action makes a dialog invisible, often by unsetting a flag or selected item.
       newContext = setValueByPath(newContext, "selectedTask", null);
       // Assuming "isTaskDetailDialogVisible" controls visibility.
-      newContext = setValueByPath(newContext, "isTaskDetailDialogVisible", false);
-      console.log(`[executeAction] HIDE_DIALOG: set isTaskDetailDialogVisible to false.`);
+      newContext = setValueByPath(
+        newContext,
+        "isTaskDetailDialogVisible",
+        false
+      );
+      console.log(
+        `[executeAction] HIDE_DIALOG: set isTaskDetailDialogVisible to false.`
+      );
       break;
     }
 
     case "UPDATE_DATA": {
-        // Updates a specific data path with a value from the payload
-        if (target && payload && 'value' in payload) {
-          // target is used as the data path here
-          newContext = setValueByPath(newContext, target, payload.value);
-        } else {
-           console.warn(`[executeAction] UPDATE_DATA requires targetPath (data path) and payload with 'value' property.`);
-        }
-        break;
+      // Updates a specific data path with a value from the payload
+      if (target && payload && "value" in payload) {
+        // target is used as the data path here
+        newContext = setValueByPath(newContext, target, payload.value);
+      } else {
+        console.warn(
+          `[executeAction] UPDATE_DATA requires targetPath (data path) and payload with 'value' property.`
+        );
+      }
+      break;
     }
 
     case "ADD_ITEM": {
       // Adds an item to an array specified by the target path
       if (!target) {
-         console.warn(`[executeAction] ADD_ITEM requires target path.`);
-         break;
+        console.warn(`[executeAction] ADD_ITEM requires target path.`);
+        break;
       }
-       if (!payload?.item) {
-         console.warn(`[executeAction] ADD_ITEM requires payload with item property.`);
-         break;
-       }
+      if (!payload?.item) {
+        console.warn(
+          `[executeAction] ADD_ITEM requires payload with item property.`
+        );
+        break;
+      }
 
       const list = getValueByPath(newContext, target);
       if (!Array.isArray(list)) {
-        console.warn(`[executeAction] ADD_ITEM failed: target path "${target}" does not resolve to an array.`);
+        console.warn(
+          `[executeAction] ADD_ITEM failed: target path "${target}" does not resolve to an array.`
+        );
         break;
       }
 
       const newItem = payload.item;
       const position = payload.position as string | undefined;
       let newList;
-      if (position === 'start') {
-          newList = [newItem, ...list];
+      if (position === "start") {
+        newList = [newItem, ...list];
       } else {
-           newList = [...list, newItem];
+        newList = [...list, newItem];
       }
 
       newContext = setValueByPath(newContext, target, newList);
       break;
     }
 
-     case "DELETE_ITEM": {
-       // Deletes an item (identified by id) from an array specified by the target path
+    case "DELETE_ITEM": {
+      // Deletes an item (identified by id) from an array specified by the target path
       if (!target) {
-         console.warn(`[executeAction] DELETE_ITEM requires target path.`);
-         break;
+        console.warn(`[executeAction] DELETE_ITEM requires target path.`);
+        break;
       }
       const itemId = payload?.id as string | number | undefined;
-       if (itemId === undefined || itemId === null) {
-         console.warn(`[executeAction] DELETE_ITEM requires payload with id property.`);
-         break;
-       }
+      if (itemId === undefined || itemId === null) {
+        console.warn(
+          `[executeAction] DELETE_ITEM requires payload with id property.`
+        );
+        break;
+      }
 
       const list = getValueByPath(newContext, target);
-        if (!Array.isArray(list)) {
-          console.warn(`[executeAction] DELETE_ITEM failed: target path "${target}" does not resolve to an array.`);
-          break;
-        }
-
-        // Filter out the item with the matching id
-        const newList = list.filter((item: { id?: string | number | undefined }) => item?.id !== itemId);
-
-        // Only update if the list actually changed
-        if (newList.length !== list.length) {
-            newContext = setValueByPath(newContext, target, newList);
-        } else {
-             console.warn(`[executeAction] DELETE_ITEM: Item with id "${itemId}" not found in list at path "${target}".`);
-        }
+      if (!Array.isArray(list)) {
+        console.warn(
+          `[executeAction] DELETE_ITEM failed: target path "${target}" does not resolve to an array.`
+        );
         break;
-     }
+      }
+
+      // Filter out the item with the matching id
+      const newList = list.filter(
+        (item: { id?: string | number | undefined }) => item?.id !== itemId
+      );
+
+      // Only update if the list actually changed
+      if (newList.length !== list.length) {
+        newContext = setValueByPath(newContext, target, newList);
+      } else {
+        console.warn(
+          `[executeAction] DELETE_ITEM: Item with id "${itemId}" not found in list at path "${target}".`
+        );
+      }
+      break;
+    }
+
+    case "SAVE_TASK_CHANGES": {
+      if (!target) {
+        // target here would be the selectedTask.id passed from payload or event
+        console.warn(
+          "[executeAction] SAVE_TASK_CHANGES requires target (task ID)."
+        );
+        break;
+      }
+      const taskIdToSave = target;
+      const currentTasks = getValueByPath(newContext, "tasks.data") as
+        | DataItem[]
+        | undefined;
+      const selectedTaskData = getValueByPath(newContext, "selectedTask") as
+        | DataItem
+        | undefined;
+
+      if (
+        currentTasks &&
+        selectedTaskData &&
+        selectedTaskData.id === taskIdToSave
+      ) {
+        const updatedTasks = currentTasks.map(
+          (task) =>
+            task.id === taskIdToSave
+              ? { ...task, ...selectedTaskData, ...payload }
+              : task // Merge selectedTaskData and any direct payload changes
+        );
+        newContext = setValueByPath(newContext, "tasks.data", updatedTasks);
+        newContext = setValueByPath(newContext, "selectedTask", null); // Clear selected task
+        newContext = setValueByPath(
+          newContext,
+          "isTaskDetailDialogVisible",
+          false
+        ); // Hide dialog
+        console.log(
+          `[executeAction] SAVE_TASK_CHANGES: Updated task ${taskIdToSave} and hid dialog.`
+        );
+      } else {
+        console.warn(
+          "[executeAction] SAVE_TASK_CHANGES: Could not save. Task list, selected task, or ID mismatch.",
+          {
+            taskIdToSave,
+            selectedTaskDataId: selectedTaskData?.id,
+            currentTasksExists: !!currentTasks,
+          }
+        );
+      }
+      break;
+    }
 
     // --- Deprecated SET_VALUE action, prefer UPDATE_DATA ---
     // case "SET_VALUE": {
