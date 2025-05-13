@@ -38,7 +38,7 @@ const parseStyleString = (styleString: string): React.CSSProperties => {
         .replace(/-([a-z])/g, (g) => g[1].toUpperCase());
       // Revert to simple assignment, accepting the potential type mismatch flagged by linter.
       // Casting to 'any' is forbidden, and 'string' doesn't satisfy all properties.
-      // @ts-expect-error // Suppressing complex type checking for dynamic style parsing
+      // @ts-expect-error - Trusting the string value is valid for the CSS property
       style[camelCasedProperty as keyof React.CSSProperties] = value.trim();
     }
   });
