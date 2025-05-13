@@ -200,6 +200,21 @@ export const AutoUI: React.FC<AutoUIProps> = ({
   const scopedGoal = goal;
   // Pass undefined for the router - it will use the default in the useUIStateEngine function
 
+  // State for the layout directly from the planner/reducer
+  // const [currentPlannerLayout, setCurrentPlannerLayout] = useState<UISpecNode | null>(null);
+
+  // State for the layout after bindings have been resolved
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [resolvedLayout, setResolvedLayout] = useState<UISpecNode | undefined>(
+    undefined
+  );
+  const resolvedLayoutRef = useRef<UISpecNode | undefined | null>(null);
+
+  // State for the final rendered React element
+  const [renderedNode, setRenderedNode] = useState<React.ReactElement | null>(
+    null
+  );
+
   // Check if required components are available
   useEffect(() => {
     if (componentAdapter === "shadcn") {
@@ -346,20 +361,33 @@ export const AutoUI: React.FC<AutoUIProps> = ({
   // Process events and update data context
   const processEvent = useCallback(
     async (event: UIEvent) => {
-      // Process through event hooks
-      const shouldProceed = await eventManagerRef.current.processEvent(event);
+      const currentLayoutViaRef = resolvedLayoutRef.current;
 
-      // Call the external event handler if provided
-      if (onEvent) {
-        onEvent(event);
-      }
+      const shouldProceed = await eventManagerRef.current.processEvent(event);
+      if (onEvent) onEvent(event);
 
       if (!shouldProceed) {
-        console.info("Event processing was prevented by hooks", event);
+        console.info("[AutoUI.processEvent] Event processing stopped by hooks", event);
         return;
       }
 
-      // Find the event configuration in the layout tree
+      console.log(`[AutoUI.processEvent] Event for nodeId: ${event.nodeId}`);
+      if (currentLayoutViaRef) { 
+        const taskListViewNode = currentLayoutViaRef.children?.find(c => c.id === 'taskListView' || c.id === 'task-list-view');
+        let taskListViewChildrenSnapshot = null;
+        if (taskListViewNode && taskListViewNode.children) {
+          taskListViewChildrenSnapshot = taskListViewNode.children.map(child => ({ 
+            id: child.id, 
+            children: child.children?.map(grandChild => ({id: grandChild.id, props: grandChild.props, events: grandChild.events})) 
+          }));
+        }
+        console.log(`[AutoUI.processEvent] Using currentLayoutViaRef snapshot (taskListView children):`, JSON.stringify(taskListViewChildrenSnapshot, null, 2));
+      } else {
+        console.warn(`[AutoUI.processEvent] currentLayoutViaRef is undefined when processing event: ${event.nodeId}.`);
+        handleEvent(event, state.layout); // Fallback to state.layout from engine for the core handleEvent call
+        return;
+      }
+
       const findNodeById = (
         node: UISpecNode | undefined | null,
         id: string
@@ -375,55 +403,41 @@ export const AutoUI: React.FC<AutoUIProps> = ({
         return undefined;
       };
 
-      const sourceNode = findNodeById(state.layout, event.nodeId);
+      const sourceNode = findNodeById(currentLayoutViaRef, event.nodeId);
       if (!sourceNode) {
-        console.warn(`Node not found for event: ${event.nodeId}`);
-        handleEvent(event);
+        console.warn(`[AutoUI.processEvent] Node not found for event: ${event.nodeId} in currentLayoutViaRef.`);
+        handleEvent(event, state.layout); // Fallback
         return;
       }
 
-      // Get the event configuration
       const eventConfig = sourceNode.events?.[event.type];
       if (!eventConfig) {
         console.warn(
-          `No event config found for ${event.type} on node ${event.nodeId}`
+          `[AutoUI.processEvent] No event config found for ${event.type} on node ${event.nodeId}`
         );
-        handleEvent(event);
+        handleEvent(event, currentLayoutViaRef); 
         return;
       }
 
-      // Execute the action and update data context
       const newContext = executeAction(
         eventConfig.action,
-        eventConfig.target || "", // Provide empty string as fallback if target is null
+        eventConfig.target || "",
         {
           ...eventConfig.payload,
           ...event.payload,
         },
         dataContext,
-        state.layout || undefined
+        currentLayoutViaRef 
       );
-
-      // Update the data context
       setDataContext(newContext);
-
-      // Forward the event to the UI state engine
-      handleEvent(event);
+      handleEvent(event, currentLayoutViaRef, newContext); 
     },
-    [dataContext, handleEvent, onEvent, state.layout]
+    // Dependencies: handleEvent, onEvent, dataContext, eventManagerRef, state.layout (for fallback in handleEvent)
+    // resolvedLayout (state) is NOT a direct dependency anymore due to the ref.
+    [dataContext, handleEvent, onEvent, eventManagerRef, state.layout]
   );
 
   // Resolve bindings for the layout using the current data context
-  const [resolvedLayout, setResolvedLayout] = useState<UISpecNode | undefined>(
-    undefined
-  );
-  // Add state for rendered node
-  const [renderedNode, setRenderedNode] = useState<React.ReactElement | null>(
-    null
-  );
-
-  // Update the resolved layout whenever state.layout or dataContext changes
-  // Create a stable function to avoid constantly re-running the effect
   const resolveLayoutBindings = useCallback(async () => {
     if (state.layout && dataContext) {
       // Existing logs
@@ -448,12 +462,14 @@ export const AutoUI: React.FC<AutoUIProps> = ({
 
       const resolved = await resolveBindings(correctedLayout, dataContext);
       setResolvedLayout(resolved);
+      resolvedLayoutRef.current = resolved; // Update the ref
       console.log(
         "[AutoUI Debug] Resolved layout after bindings:",
         JSON.stringify(resolved, null, 2)
       );
     } else {
       setResolvedLayout(undefined);
+      resolvedLayoutRef.current = undefined; // Update the ref
     }
   }, [state.layout, dataContext]);
 
@@ -464,21 +480,23 @@ export const AutoUI: React.FC<AutoUIProps> = ({
 
   // Handle async rendering of the node with a stable reference
   const renderResolvedLayout = useCallback(async () => {
-    if (resolvedLayout) {
+    const layoutToRender = resolvedLayoutRef.current;
+    if (layoutToRender) {
       try {
         const rendered = await renderNode(
-          resolvedLayout,
+          layoutToRender,
           componentAdapter as "shadcn",
           processEvent
         );
         setRenderedNode(rendered);
       } catch (err) {
         console.error("Error rendering node:", err);
+        setRenderedNode(<div className="autoui-error">Error rendering UI. Check console.</div>); // Show error in UI
       }
     } else {
       setRenderedNode(null);
     }
-  }, [resolvedLayout, componentAdapter, processEvent]);
+  }, [componentAdapter, processEvent]);
 
   // Call the stable render function in the effect
   useEffect(() => {
@@ -505,8 +523,7 @@ export const AutoUI: React.FC<AutoUIProps> = ({
       data-mode={integration.mode}
       data-scope={scope?.type || "full"}
     >
-      {state.loading || !resolvedLayout ? (
-        // Render shimmer loading state
+      {state.loading || !resolvedLayoutRef.current ? ( // Use ref for loading check
         <div className="autoui-loading">
           {state.layout ? (
             renderShimmer(state.layout, componentAdapter as "shadcn")

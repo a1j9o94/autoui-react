@@ -5,8 +5,9 @@ import {
   processBinding,
   resolveBindings,
   DataContext,
+  executeAction,
 } from "./bindings"; // Adjust path as necessary
-import { UISpecNode } from "../schema/ui"; // Re-added
+import { UISpecNode, DataItem } from "../schema/ui"; // Re-added UISpecNode and Added DataItem
 import * as SystemEvents from "./system-events"; // Import to mock
 
 // Define a more specific structure for the test context
@@ -608,7 +609,10 @@ describe("resolveBindings", () => {
 
     // Check parent props
     expect(resolvedNode.props?.style).toBe("list-style");
-    expect(resolvedNode.bindings?.data).toBeUndefined(); // Original data binding should ideally be removed or ignored
+    // The ListView's own bindings object should be preserved
+    expect(resolvedNode.bindings).toEqual(node.bindings);
+    // The resolved data from the binding should be in props
+    expect(resolvedNode.props?.data).toEqual(context.items);
 
     // Check children length matches data source
     expect(resolvedNode.children).toBeDefined();
@@ -1034,4 +1038,371 @@ describe("resolveBindings", () => {
     expect(child2?.id).toBe("fail-item-template-item-2");
     expect(child2?.props?.key).toBe("item-2");
   });
+
+  it("should NOT resolve templates or paths directly in props", async () => {
+    const node: UISpecNode = {
+      ...baseNode,
+      id: "node-props-vs-bindings",
+      props: {
+        initialProp: "initial",
+        templateInProp: "{{user.name}}", // Template string in props
+        pathInProp: "user.id",         // Path string in props
+      },
+      bindings: { // Only this binding should affect props
+        fromBinding: "directValue",
+      },
+    };
+
+    const resolvedNode = await resolveBindings(node, context);
+
+    expect(resolvedNode.props).toBeDefined();
+    // Check that props from original node.props remain UNRESOLVED
+    expect(resolvedNode.props?.initialProp).toBe("initial");
+    expect(resolvedNode.props?.templateInProp).toBe("{{user.name}}"); // Should NOT be "Alice"
+    expect(resolvedNode.props?.pathInProp).toBe("user.id");           // Should NOT be "user-123"
+
+    // Check that the prop from the binding WAS resolved and added
+    expect(resolvedNode.props?.fromBinding).toBe(42);
+
+    // Ensure the original bindings object is preserved, not cleared
+    expect(resolvedNode.bindings).toEqual(node.bindings);
+  });
+
+  it("should preserve template bindings on expanded list view items and resolve their props", async () => {
+    const listNode: UISpecNode = {
+      id: "list-view-preserve-item-bindings",
+      node_type: "ListView",
+      props: { listProp: "listValue" },
+      bindings: { // Original bindings for the ListView itself
+        data: "items",
+      },
+      events: null,
+      children: [
+        // Template child
+        {
+          id: "template-item-for-preservation",
+          node_type: "ListItem",
+          props: { staticChildProp: "childStatic" },
+          bindings: { // Original bindings for the template item
+            itemId: "{{item.id}}",
+            itemSpecificValue: "{{item.value}}",
+            userNameFromContext: "{{user.name}}", // A binding from main context
+          },
+          events: null,
+          children: null,
+        },
+      ],
+    };
+
+    const resolvedListNode = await resolveBindings(listNode, context);
+
+    // 1. Check ListView node itself
+    expect(resolvedListNode.props?.data).toEqual(context.items);
+    expect(resolvedListNode.props?.listProp).toBe("listValue");
+    expect(resolvedListNode.bindings).toEqual(listNode.bindings); // ListView's own bindings are preserved
+
+    // 2. Check expanded list items
+    expect(resolvedListNode.children).toHaveLength(context.items.length); // context.items has 2 items in standard setup
+    
+    const templateChildBindings = listNode.children![0].bindings;
+
+    resolvedListNode.children?.forEach((resolvedChildItem, index) => {
+      const sourceItem = context.items[index]; // e.g. { id: "item-1", value: 100 }
+
+      // Check props are resolved correctly for each child item
+      expect(resolvedChildItem.props?.staticChildProp).toBe("childStatic");
+      expect(resolvedChildItem.props?.itemId).toBe(sourceItem.id);
+      expect(resolvedChildItem.props?.itemSpecificValue).toBe(sourceItem.value);
+      expect(resolvedChildItem.props?.userNameFromContext).toBe(context.user.name);
+
+      // Crucially, check that the original bindings object from the template is preserved on the resolved child item
+      expect(resolvedChildItem.bindings).toEqual(templateChildBindings);
+    });
+  });
+});
+
+// ====================================
+// executeAction Tests
+// ====================================
+
+// Define a simple interface for task items for these tests
+interface TestTaskItem {
+  id: string;
+  title: string;
+  status: string;
+  [key: string]: unknown; // Allow other properties if necessary, prefer unknown over any
+}
+
+describe("executeAction", () => {
+  let context: DataContext;
+
+  beforeEach(() => {
+    // Base context for action tests
+    context = {
+      user: { id: "u1", name: "Alice" },
+      tasks: {
+        data: [
+          { id: "t1", title: "Task 1", status: "pending" },
+          { id: "t2", title: "Task 2", status: "in_progress" },
+          { id: "t3", title: "Task 3", status: "pending" },
+        ],
+        schema: {}, // Mock schema if needed by actions
+      },
+      selected: null,
+      form: {
+        newTaskTitle: "",
+        newTaskStatus: "pending",
+      },
+    };
+  });
+
+  it("should handle UPDATE_DATA action using target as path", () => {
+    const newContext = executeAction(
+      "UPDATE_DATA",
+      "form.newTaskTitle", // target used as data path
+      { value: "New Task Title" }, // payload contains the value
+      context
+    );
+    expect((newContext.form as { newTaskTitle?: string })?.newTaskTitle).toBe("New Task Title");
+    // Ensure original context is unchanged
+    expect((context.form as { newTaskTitle?: string })?.newTaskTitle).toBe("");
+  });
+
+   it("should ignore UPDATE_DATA if target path or payload value is missing", () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Missing targetPath
+    let newContext = executeAction(
+      "UPDATE_DATA",
+      undefined,
+      { value: "New Value" },
+      context
+    );
+    expect(newContext).toEqual(context); // Should not change
+    expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("UPDATE_DATA requires targetPath"));
+
+    // Missing payload.value
+    newContext = executeAction(
+      "UPDATE_DATA",
+      "form.newTaskTitle",
+      { /* no value property */ },
+      context
+    );
+    expect(newContext).toEqual(context); // Should not change
+     expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("UPDATE_DATA requires targetPath"));
+
+    consoleWarnSpy.mockRestore();
+  });
+
+
+  it("should handle VIEW_DETAIL action, setting context.selected", () => {
+    const itemToSelect = { id: "t2", title: "Task 2", status: "in_progress" };
+    const newContext = executeAction(
+      "VIEW_DETAIL",
+      "detail-node-id", // target node id (currently unused by logic, but part of signature)
+      { item: itemToSelect }, // payload contains the item to select
+      context
+    );
+    expect(newContext.selected).toEqual(itemToSelect);
+    expect(context.selected).toBeNull();
+  });
+
+    it("should ignore VIEW_DETAIL if payload.item is missing", () => {
+     const newContext = executeAction(
+       "VIEW_DETAIL",
+       "detail-node-id",
+       { /* no item property */ },
+       context
+     );
+     expect(newContext).toEqual(context); // Should remain unchanged
+   });
+
+
+  it("should handle ADD_ITEM action, adding item to end of list specified by target path", () => {
+    const newItem = { id: "t4", title: "Task 4", status: "new" };
+    const newContext = executeAction(
+      "ADD_ITEM",
+      "tasks.data", // target path pointing to the array
+      { item: newItem }, // payload contains the item to add
+      context
+    );
+    expect((newContext.tasks as { data?: TestTaskItem[] })?.data).toHaveLength(4);
+    expect((newContext.tasks as { data?: TestTaskItem[] })?.data?.[3]).toEqual(newItem);
+    // Check immutability
+    expect((context.tasks as { data?: TestTaskItem[] })?.data).toHaveLength(3);
+  });
+
+  it("should handle ADD_ITEM prepending item if payload.position is 'start'", () => {
+    const newItem = { id: "t0", title: "Task 0", status: "new" };
+    const newContext = executeAction(
+      "ADD_ITEM",
+      "tasks.data", // target path
+      { item: newItem, position: "start" }, // payload with item and position
+      context
+    );
+    expect((newContext.tasks as { data?: TestTaskItem[] })?.data).toHaveLength(4);
+    expect((newContext.tasks as { data?: TestTaskItem[] })?.data?.[0]).toEqual(newItem);
+    expect(((newContext.tasks as { data?: TestTaskItem[] })?.data?.[1] as TestTaskItem).id).toBe("t1"); // Check original first item is now second
+    expect((context.tasks as { data?: TestTaskItem[] })?.data).toHaveLength(3);
+  });
+
+
+  it("should ignore ADD_ITEM if target path does not resolve to an array", () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const newItem = { id: "x1", title: "Invalid Add" };
+    const newContext = executeAction(
+      "ADD_ITEM",
+      "user.name", // Target is a string, not an array
+      { item: newItem },
+      context
+    );
+    expect(newContext).toEqual(context); // Context should not change
+    expect(consoleWarnSpy).toHaveBeenCalledWith('[executeAction] ADD_ITEM failed: target path "user.name" does not resolve to an array.');
+    consoleWarnSpy.mockRestore();
+  });
+
+    it("should ignore ADD_ITEM if payload.item is missing", () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const newContext = executeAction(
+      "ADD_ITEM",
+      "tasks.data",
+      { /* no item */ },
+      context
+    );
+    expect(newContext).toEqual(context); // Context should not change
+     expect(consoleWarnSpy).toHaveBeenCalledWith('[executeAction] ADD_ITEM requires payload with item property.');
+    consoleWarnSpy.mockRestore();
+  });
+
+
+  it("should handle DELETE_ITEM action, removing item by id from list specified by target path", () => {
+    const itemIdToDelete = "t2";
+    const newContext = executeAction(
+      "DELETE_ITEM",
+      "tasks.data", // target path pointing to the array
+      { id: itemIdToDelete }, // payload contains the id of the item to delete
+      context
+    );
+    expect((newContext.tasks as { data?: TestTaskItem[] })?.data).toHaveLength(2);
+    // Check that the correct item was removed
+    expect(((newContext.tasks as { data?: TestTaskItem[] })?.data)?.find((t) => t.id === itemIdToDelete)).toBeUndefined();
+    expect(((newContext.tasks as { data?: TestTaskItem[] })?.data?.[0] as TestTaskItem).id).toBe("t1");
+    expect(((newContext.tasks as { data?: TestTaskItem[] })?.data?.[1] as TestTaskItem).id).toBe("t3");
+    // Check immutability
+    expect((context.tasks as { data?: TestTaskItem[] })?.data).toHaveLength(3);
+  });
+
+  it("should ignore DELETE_ITEM if item id is not found in the list", () => {
+    const newContext = executeAction(
+      "DELETE_ITEM",
+      "tasks.data",
+      { id: "non-existent-id" },
+      context
+    );
+    expect((newContext.tasks as { data?: TestTaskItem[] })?.data).toHaveLength(3);
+    expect(newContext).toEqual(context); // Context should be unchanged
+  });
+
+   it("should ignore DELETE_ITEM if target path does not resolve to an array", () => {
+     const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+     const newContext = executeAction(
+       "DELETE_ITEM",
+       "user.name", // Target is string, not array
+       { id: "t1" },
+       context
+     );
+     expect(newContext).toEqual(context); // Context should not change
+     expect(consoleWarnSpy).toHaveBeenCalledWith('[executeAction] DELETE_ITEM failed: target path "user.name" does not resolve to an array.');
+     consoleWarnSpy.mockRestore();
+   });
+
+  it("should ignore DELETE_ITEM if payload.id is missing", () => {
+      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const newContext = executeAction(
+        "DELETE_ITEM",
+        "tasks.data",
+        { /* no id */ },
+        context
+      );
+      expect(newContext).toEqual(context); // Context should not change
+      expect(consoleWarnSpy).toHaveBeenCalledWith('[executeAction] DELETE_ITEM requires payload with id property.');
+      consoleWarnSpy.mockRestore();
+    });
+
+  it("should handle SHOW_DIALOG action, setting selectedTask and visibility flag", () => {
+    const contextWithTasks = {
+      ...context,
+      tasks: {
+        data: [
+          { id: "task-1", title: "Task One", description: "Description one" },
+          { id: "task-2", title: "Task Two", description: "Description two" },
+        ] as DataItem[], // Ensure it's treated as DataItem[]
+        schema: {},
+      },
+      selectedTask: null,
+      isTaskDetailDialogVisible: false,
+    };
+
+    // Case 1: Valid taskId
+    let newContext = executeAction(
+      "SHOW_DIALOG",
+      "taskDetailDialogNodeId", // target node id
+      { taskId: "task-1" },       // payload with taskId
+      contextWithTasks
+    );
+
+    expect((newContext.selectedTask as DataItem)?.id).toBe("task-1");
+    expect((newContext.selectedTask as DataItem)?.title).toBe("Task One");
+    expect(newContext.isTaskDetailDialogVisible).toBe(true);
+
+    // Case 2: Invalid taskId
+    newContext = executeAction(
+      "SHOW_DIALOG",
+      "taskDetailDialogNodeId",
+      { taskId: "task-nonexistent" },
+      contextWithTasks // Use original context for a clean test of this case
+    );
+    expect(newContext.selectedTask).toBeNull();
+    expect(newContext.isTaskDetailDialogVisible).toBe(true); // Dialog still becomes visible
+
+    // Case 3: Missing taskId in payload
+    newContext = executeAction(
+      "SHOW_DIALOG",
+      "taskDetailDialogNodeId",
+      {}, // Empty payload
+      contextWithTasks // Use original context
+    );
+    // selectedTask should remain as it was in contextWithTasks (null initially for this sub-case)
+    // or be explicitly set to null if that's the desired handling for missing taskId.
+    // Current SHOW_DIALOG logic would leave it null if payload.taskId is missing.
+    expect(newContext.selectedTask).toBeNull(); 
+    expect(newContext.isTaskDetailDialogVisible).toBe(true); // Dialog becomes visible
+  });
+
+  it("should return original context for unknown actions", () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const newContext = executeAction("UNKNOWN_ACTION", undefined, {}, context);
+    expect(newContext).toEqual(context);
+    expect(consoleWarnSpy).toHaveBeenCalledWith("[executeAction] Unhandled action type: UNKNOWN_ACTION");
+    consoleWarnSpy.mockRestore();
+  });
+
+    it("should preserve other parts of the context when updating", () => {
+      // Test UPDATE_DATA preserves 'selected'
+      let newContext = executeAction("UPDATE_DATA", "form.newTaskTitle", { value: "Test" }, context);
+      expect(newContext.selected).toBeNull();
+      expect(newContext.tasks).toEqual(context.tasks);
+
+       // Test ADD_ITEM preserves 'user' and 'form'
+       const newItem = { id: "t4", title: "Task 4", status: "new" };
+       newContext = executeAction("ADD_ITEM", "tasks.data", { item: newItem }, context);
+       expect(newContext.user).toEqual(context.user);
+       expect(newContext.form).toEqual(context.form);
+
+       // Test DELETE_ITEM preserves 'user' and 'form'
+       newContext = executeAction("DELETE_ITEM", "tasks.data", { id: "t1" }, context);
+       expect(newContext.user).toEqual(context.user);
+       expect(newContext.form).toEqual(context.form);
+     });
+
 });

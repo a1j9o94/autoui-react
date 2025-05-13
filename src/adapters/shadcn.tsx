@@ -359,7 +359,15 @@ export const adapterMap: Record<
     // resolveBindings populates node.children with resolved items, each having a key.
     // We just need to render these children.
     // Extract key and style first
-    const { className, style: styleProp, key, ...restProps } = node.props || {}; // Removed unused selectable
+    const {
+      className,
+      style: styleProp,
+      key,
+      // Exclude data prop (array) from being spread onto the DOM element
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      data: _data,
+      ...restProps
+    } = node.props || {}; // Removed unused selectable & data
 
     // Parse style string if necessary
     const style =
@@ -789,12 +797,11 @@ export const adapterMap: Record<
   Dialog: (node, processEvent) => {
     // Determine if the dialog should be open. Check bindings first, then props.
     // Default to false if neither is specified.
-    const isOpen = getSafeBinding(
-      node.bindings,
-      "open",
-      isBoolean,
-      getSafeProp(node.props, "open", isBoolean, false)
-    ); // Fallback to props, then false
+    const isOpen = getSafeBinding(node.bindings, "visible", isBoolean, // Check bindings.visible (planner output)
+                    getSafeProp(node.props, "open", isBoolean,          // Then props.open (if binding resolution put it there)
+                      getSafeProp(node.props, "visible", isBoolean, false) // Then props.visible (if binding resolution put it there under 'visible')
+                    )
+                  );
 
     // Extract key and className first. Intentionally exclude styleProp and open (_open)
     const {

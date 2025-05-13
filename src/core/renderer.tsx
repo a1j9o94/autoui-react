@@ -34,7 +34,7 @@ export async function renderNode(
   processEvent?: (event: UIEvent) => void
 ): Promise<React.ReactElement> {
   const startTime = Date.now();
-  const nodeId = node.id;
+  const nodeId = node.id; // Cache Key
 
   // Check cache first
   const cachedItem = renderedNodesCache.get(nodeId);

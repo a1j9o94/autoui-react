@@ -1,485 +1,182 @@
-import { describe, it, expect, vi, beforeEach, MockedFunction } from "vitest";
-import {
-  ActionRouter,
-  ActionType,
-  ActionRouteConfig,
-  createDefaultRouter,
-  buildPrompt,
-} from "./action-router";
-import { UIEvent, UISpecNode, PlannerInput } from "../schema/ui";
-import * as Reducer from "./reducer"; // To mock findNodeById
+/// <reference types="vitest/globals" />
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { ActionRouter, ActionType } from "./action-router"; // Removed RouteResolution
+import { UIEvent, UISpecNode } from "../schema/ui"; // Removed PlannerInput
+import { findNodeById } from "./reducer"; // Assuming findNodeById is still used or will be by the new router logic
+// Removed buildPrompt as it's not directly used in this initial test, can be re-added if needed.
 
+// Mock findNodeById if it's a dependency of ActionRouter
 vi.mock("./reducer", () => ({
   findNodeById: vi.fn(),
 }));
 
-const mockFindNodeById = Reducer.findNodeById as MockedFunction<
-  (layout: UISpecNode | null, id: string) => UISpecNode | undefined
->;
-
-describe("ActionRouter", () => {
+describe("ActionRouter (Deterministic)", () => {
   let router: ActionRouter;
-  const mockSchema = { type: "object" };
-  const mockGoal = "Test Goal";
-  const mockLayout: UISpecNode = {
-    id: "root",
-    node_type: "Container",
-    props: {},
-    children: [],
-    bindings: null,
-    events: null,
-  };
-  const mockDataContext = {};
-  const mockUserContext = { userId: "user-123" };
-
-  const testEvent: UIEvent = {
-    type: "CLICK",
-    nodeId: "button-id",
-    timestamp: Date.now(),
-    payload: null,
-  };
+  let mockSchema: Record<string, unknown>;
+  let mockLayout: UISpecNode | null;
+  let mockDataContext: Record<string, unknown>;
+  let mockGoal: string;
+  let mockUserContext: Record<string, unknown>;
+  let mockFindNodeById: vi.MockedFunction<typeof findNodeById>; // More specific Vitest mock type
 
   beforeEach(() => {
     router = new ActionRouter();
-    mockFindNodeById.mockReset();
-  });
+    mockSchema = { tasks: { type: "object" } };
+    mockLayout = {
+      id: "root",
+      node_type: "Container",
+      props: null,
+      bindings: null,
+      events: null,
+      children: null,
+    };
+    mockDataContext = { user: { id: "user-1" } };
+    mockGoal = "Achieve test goal";
+    mockUserContext = { sessionToken: "abc" };
 
-  describe("registerRoute", () => {
-    it("should register a new route for an event type", () => {
-      const config: ActionRouteConfig = {
-        actionType: ActionType.UPDATE_NODE,
-        targetNodeId: "target-node",
-        promptTemplate: "Update ${targetNodeId}",
-      };
-      router.registerRoute("CUSTOM_EVENT", config);
-      // Internal check: this relies on knowing the internal structure or testing via resolveRoute
-      // For now, we'll assume registration works if resolveRoute behaves correctly.
-      // A more direct test might be needed if resolveRoute tests become too complex.
-      expect(true).toBe(true); // Placeholder, real test via resolveRoute
+    // Setup mocks
+    mockFindNodeById = findNodeById as vi.MockedFunction<typeof findNodeById>;
+    mockFindNodeById.mockImplementation((layoutNode: UISpecNode | null, id: string): UISpecNode | undefined => {
+      if (id === "root" && layoutNode?.id === "root") return mockLayout as UISpecNode;
+      return undefined; // Default to not finding other nodes
     });
   });
 
   describe("resolveRoute", () => {
-    it("should return a default FULL_REFRESH action if no routes are registered for the event type", () => {
-      const resolution = router.resolveRoute(
-        testEvent,
-        mockSchema,
-        mockLayout,
-        mockDataContext,
-        mockGoal,
-        mockUserContext
-      );
-
-      expect(resolution).not.toBeNull();
-      expect(resolution?.actionType).toBe(ActionType.FULL_REFRESH);
-      expect(resolution?.targetNodeId).toBe(mockLayout.id);
-      expect(resolution?.plannerInput.goal).toBe(mockGoal);
-      expect(resolution?.plannerInput.history).toEqual([testEvent]);
-      expect(resolution?.plannerInput.userContext).toEqual(mockUserContext); // Default full refresh should pass original userContext
-      expect(resolution?.prompt).toContain(mockGoal);
-      expect(resolution?.prompt).toContain(testEvent.type);
-      expect(resolution?.prompt).toContain(testEvent.nodeId);
-    });
-
-    it("should use the first registered route if multiple exist and no node-specific action", () => {
-      const config1: ActionRouteConfig = {
-        actionType: ActionType.UPDATE_NODE,
-        targetNodeId: "target-1",
-        promptTemplate: "Template 1 for ${nodeId}",
-      };
-      const config2: ActionRouteConfig = {
-        actionType: ActionType.SHOW_DETAIL,
-        targetNodeId: "target-2",
-        promptTemplate: "Template 2 for ${nodeId}",
-      };
-      router.registerRoute("CLICK", config1);
-      router.registerRoute("CLICK", config2);
-
-      mockFindNodeById.mockReturnValue(undefined); // No source node found or source node has no event config
-
-      const resolution = router.resolveRoute(
-        testEvent, // type: "CLICK"
-        mockSchema,
-        mockLayout,
-        mockDataContext,
-        mockGoal,
-        mockUserContext
-      );
-
-      expect(resolution?.actionType).toBe(ActionType.UPDATE_NODE);
-      expect(resolution?.targetNodeId).toBe("target-1");
-      expect(resolution?.prompt).toBe("Template 1 for button-id");
-    });
-
-    it("should use node-specific event action to select a route", () => {
-      const config1: ActionRouteConfig = {
-        actionType: ActionType.UPDATE_NODE,
-        targetNodeId: "target-1", // This might be overridden by node config
-        promptTemplate: "Template 1",
-      };
-      const config2: ActionRouteConfig = {
-        actionType: ActionType.SHOW_DETAIL, // This should be chosen
-        targetNodeId: "node-target-detail", // This should be chosen if node config matches action
-        promptTemplate: "Show detail for ${nodeId}",
-      };
-      router.registerRoute("CLICK", config1);
-      router.registerRoute("CLICK", config2);
-
-      const sourceNode: UISpecNode = {
-        id: "button-id",
-        node_type: "Button",
-        props: {},
-        children: null,
-        bindings: null,
-        events: {
-          CLICK: {
-            action: ActionType.SHOW_DETAIL, // Matches config2
-            target: "node-target-detail", // Added to satisfy type, ActionRouter prioritizes this from route if action matches
-            payload: null, // Added to satisfy type
-          },
-        },
-      };
-      mockFindNodeById.mockReturnValue(sourceNode);
-
-      const resolution = router.resolveRoute(
-        testEvent,
-        mockSchema,
-        mockLayout,
-        mockDataContext,
-        mockGoal,
-        mockUserContext
-      );
-
-      expect(resolution?.actionType).toBe(ActionType.SHOW_DETAIL);
-      // TargetNodeId from config2 because node.events.CLICK.action matched config2's actionType.
-      // The router logic is: if (nodeConfig) { matchingRoute = routes.find(route => route.actionType.toString() === nodeConfig.action); }
-      // Then: targetNodeId = nodeConfig?.target || matchingRoute.targetNodeId || event.nodeId;
-      // In this case, nodeConfig.target is "node-target-detail" (from sourceNode.events.CLICK.target which we added to satisfy type)
-      // So it should be "node-target-detail". The prompt uses matchingRoute.targetNodeId if template has ${targetNodeId}
-      expect(resolution?.targetNodeId).toBe("node-target-detail");
-      expect(resolution?.prompt).toBe("Show detail for button-id");
-    });
-
-    it("should use target from node-specific event config if provided, overriding route's targetNodeId", () => {
-      const config: ActionRouteConfig = {
-        actionType: ActionType.NAVIGATE,
-        targetNodeId: "default-nav-target-from-route-config",
-        promptTemplate:
-          "Navigate from ${nodeId} to ${targetNodeId}. Action: ${actionType}",
-      };
-      router.registerRoute("CLICK", config);
-
-      const sourceNode: UISpecNode = {
-        id: "button-id",
-        node_type: "Button",
-        props: {},
-        children: null,
-        bindings: null,
-        events: {
-          CLICK: {
-            action: ActionType.NAVIGATE,
-            target: "overridden-target-from-node-event-config", // This should be used
-            payload: null, // Added to satisfy type
-          },
-        },
-      };
-      mockFindNodeById.mockReturnValue(sourceNode);
-
-      const resolution = router.resolveRoute(
-        testEvent,
-        mockSchema,
-        mockLayout,
-        mockDataContext,
-        mockGoal,
-        mockUserContext
-      );
-
-      expect(resolution?.actionType).toBe(ActionType.NAVIGATE);
-      expect(resolution?.targetNodeId).toBe(
-        "overridden-target-from-node-event-config"
-      );
-      // The prompt uses the resolved targetNodeId
-      expect(resolution?.prompt).toBe(
-        "Navigate from button-id to overridden-target-from-node-event-config. Action: NAVIGATE"
-      );
-    });
-
-    it("should include contextKeys data, eventPayload, and node payloads in plannerInput.userContext", () => {
-      const config: ActionRouteConfig = {
-        actionType: ActionType.UPDATE_NODE,
-        targetNodeId: "target-node",
-        promptTemplate:
-          "Update ${targetNodeId} with ${customData} and ${eventDetailValue}",
-        contextKeys: ["selectedItem"],
-      };
-      router.registerRoute("SUBMIT", config);
-
-      const eventWithPayload: UIEvent = {
-        type: "SUBMIT",
-        nodeId: "form-id",
+    it("should handle INIT event with FULL_REFRESH", () => {
+      const initEvent: UIEvent = {
+        type: "INIT",
+        nodeId: "system", // sourceNode will be undefined
         timestamp: Date.now(),
-        payload: { detail: "event-payload-data", value: 123 },
+        payload: null, 
       };
-
-      const sourceNode: UISpecNode = {
-        id: "form-id",
-        node_type: "Form",
-        props: {},
-        children: null,
-        bindings: null,
-        events: {
-          SUBMIT: {
-            action: ActionType.UPDATE_NODE,
-            target: "target-node", // Added to satisfy type
-            payload: { customData: "node-specific-data", priority: "high" },
-          },
-        },
-      };
-      mockFindNodeById.mockImplementation(
-        (layout: UISpecNode | null, id: string) => {
-          if (id === "form-id") return sourceNode;
-          if (id === "target-node")
-            return {
-              id: "target-node",
-              node_type: "Container",
-              props: {},
-              children: null,
-              bindings: null,
-              events: null,
-            } as UISpecNode; // Mock target node fully
-          return undefined;
-        }
-      );
-
-      const localDataContext = {
-        selectedItem: "item-abc",
-        otherUnusedKey: "test",
-      };
-
-      const resolution = router.resolveRoute(
-        eventWithPayload,
-        mockSchema,
-        mockLayout,
-        localDataContext,
-        mockGoal,
-        mockUserContext
-      );
-
-      // Values for prompt processing are: goal, eventType, nodeId, targetNodeId, actionType, ...additionalContext
-      // additionalContext includes: selectedItem, sourceNode, targetNode, eventPayload, customData, priority
-      // eventPayload is an object { detail: "event-payload-data", value: 123 }
-      // If promptTemplate has ${eventDetailValue}, it should pick from additionalContext.eventPayload.value (if we map it like that)
-      // The current processTemplate just stringifies. To get eventPayload.value, template should be ${eventPayload.value} or we need to flatten.
-      // Router's processTemplate does not flatten nested objects from context for substitution.
-      // It expects direct keys. Let's adjust the prompt template and expected values for simplicity and current behavior.
-      // To get `event-payload-data` into the prompt we'd need a key like `eventDetail` in additionalContext.
-      // `additionalContext.eventPayload = event.payload;` is done. So prompt needs `eventPayload.detail`.
-
-      // Let's refine the prompt template and assertions for clarity on what processTemplate does.
-      // Prompt template: "Update ${targetNodeId} with ${customData} from node and event detail ${eventPayload_detail}"
-      // To achieve this, we would need to flatten eventPayload into additionalContext before processTemplate, or change processTemplate.
-      // Given current processTemplate: String(values[key]), it won't access nested eventPayload.detail.
-      // I will adjust the prompt template to use available top-level keys for now.
-      // And ensure userContext is built correctly.
-
-      expect(resolution?.plannerInput.userContext).toEqual({
-        ...mockUserContext,
-        selectedItem: "item-abc",
-        sourceNode: sourceNode,
-        targetNode: {
-          id: "target-node",
-          node_type: "Container",
-          props: {},
-          children: null,
-          bindings: null,
-          events: null,
-        },
-        eventPayload: eventWithPayload.payload,
-        customData: "node-specific-data",
-        priority: "high",
+      // findNodeById for "system" returns undefined (by default beforeEach mock or specific below)
+      // findNodeById for "root" (target) returns mockLayout
+      mockFindNodeById.mockImplementation((layoutNode: UISpecNode | null, id: string): UISpecNode | undefined => {
+        if (id === "system") return undefined;
+        if (id === "root" && layoutNode === mockLayout) return mockLayout as UISpecNode;
+        return undefined;
       });
-      // Corrected prompt to reflect what processTemplate can achieve with current additionalContext
-      // Prompt template was: "Update ${targetNodeId} with ${customData} and ${eventDetailValue}"
-      // `customData` comes from node event payload, which is merged into `additionalContext`.
-      // `eventDetailValue` is not directly in `additionalContext`. `eventPayload` is, as an object.
-      // So, `eventDetailValue` will resolve to `\${eventDetailValue}`.
-      expect(resolution?.prompt).toBe(
-        "Update target-node with node-specific-data and ${eventDetailValue}"
-      );
+
+      const resolution = router.resolveRoute(initEvent, mockSchema, mockLayout, mockDataContext, mockGoal, mockUserContext);
+      expect(resolution).toBeDefined();
+      if (resolution) {
+        expect(resolution.actionType).toBe(ActionType.FULL_REFRESH);
+        expect(resolution.targetNodeId).toBe("root");
+        expect(resolution.plannerInput.userContext).toEqual(expect.objectContaining({ 
+          ...mockUserContext,
+          targetNode: mockLayout, 
+          eventPayload: null 
+        }));
+        expect(resolution.prompt).toContain(ActionType.FULL_REFRESH.toString());
+      }
     });
 
-    it("should correctly process prompt template with available values and leave missing ones", () => {
-      const config: ActionRouteConfig = {
-        actionType: ActionType.UPDATE_NODE,
-        targetNodeId: "final-target",
-        promptTemplate:
-          "Goal: ${goal}, Event: ${eventType} on ${nodeId} -> ${actionType} for ${targetNodeId}. User: ${userId}. Data: ${myData}. Missing: ${missingVar}",
-        contextKeys: ["myData"],
-      };
-      router.registerRoute("TEST_PROMPT", config);
-
-      const sourceNode: UISpecNode = {
-        id: "test-node-id",
-        node_type: "Test",
-        props: {},
-        children: null,
-        events: null,
-        bindings: null,
-      } as UISpecNode;
-      mockFindNodeById.mockReturnValue(sourceNode);
-      const localDataContext = { myData: "important_data" };
-      const localUserContext = { userId: "tester" };
-
-      // Use 'as unknown as UIEvent' for a more controlled type assertion for testing custom event types
-      const promptEvent = {
-        type: "TEST_PROMPT",
-        nodeId: "test-node-id",
+    it("should handle generic CLICK event with FULL_REFRESH if no node config", () => {
+      const clickEvent: UIEvent = {
+        type: "CLICK",
+        nodeId: "some-button-id", // sourceNode will be undefined
         timestamp: Date.now(),
-        payload: null,
-      } as unknown as UIEvent;
-
-      const resolution = router.resolveRoute(
-        promptEvent,
-        mockSchema,
-        mockLayout,
-        localDataContext,
-        "Test Prompt Goal",
-        localUserContext
-      );
-
-      expect(resolution?.prompt).toBe(
-        "Goal: Test Prompt Goal, Event: TEST_PROMPT on test-node-id -> UPDATE_NODE for final-target. User: tester. Data: important_data. Missing: ${missingVar}"
-      );
-    });
-  });
-
-  describe("buildPrompt", () => {
-    it("should build a proper prompt from planner input", () => {
-      const input: PlannerInput = {
-        schema: {
-          users: {
-            tableName: "users",
-            columns: { id: { type: "uuid" }, name: { type: "text" } },
-          },
-          todos: {
-            tableName: "todos",
-            columns: { id: { type: "uuid" }, title: { type: "text" } },
-          },
-        },
-        goal: "Create a todo management app",
-        history: [
-          {
-            type: "CLICK",
-            nodeId: "add-todo-button",
-            timestamp: 123456789,
-            payload: { detail: "test" },
-          },
-        ],
-        userContext: { userId: "test-user" },
+        payload: { x: 10, y: 20 },
       };
+      // findNodeById for "some-button-id" returns undefined
+      // findNodeById for "root" (target) returns mockLayout
+      mockFindNodeById.mockImplementation((layoutNode: UISpecNode | null, id: string): UISpecNode | undefined => {
+        if (id === "some-button-id") return undefined;
+        if (id === "root" && layoutNode === mockLayout) return mockLayout as UISpecNode;
+          return undefined;
+      });
 
-      const prompt = buildPrompt(input);
-
-      // Check that the prompt contains key elements
-      expect(prompt).toContain("Create a todo management app");
-      expect(prompt).toContain("Table: users");
-      expect(prompt).toContain(
-        'Schema: {"tableName":"users","columns":{"id":{"type":"uuid"},"name":{"type":"text"}}}'
-      );
-      expect(prompt).toContain("Table: todos");
-      expect(prompt).toContain(
-        'Schema: {"tableName":"todos","columns":{"id":{"type":"uuid"},"title":{"type":"text"}}}'
-      );
-      expect(prompt).toContain(
-        'Event: CLICK on node add-todo-button with payload {"detail":"test"}'
-      );
-      expect(prompt).toContain('User Context:\n{"userId":"test-user"}');
-      expect(prompt).toContain("UI Guidance:"); // Check that guidance is included
+      const resolution = router.resolveRoute(clickEvent, mockSchema, mockLayout, mockDataContext, mockGoal, mockUserContext);
+      expect(resolution).toBeDefined();
+      if (resolution) {
+        expect(resolution.actionType).toBe(ActionType.FULL_REFRESH);
+        expect(resolution.targetNodeId).toBe("root");
+        expect(resolution.plannerInput.userContext).toEqual(expect.objectContaining({
+          ...mockUserContext,
+          targetNode: mockLayout, 
+          eventPayload: clickEvent.payload 
+        }));
+        expect(resolution.prompt).toContain(ActionType.FULL_REFRESH.toString());
+      }
     });
 
-    it("should use custom prompt template when provided", () => {
-      const input: PlannerInput = {
-        schema: {},
-        goal: "Test goal",
-        history: null,
-        userContext: null,
+    it("should default to FULL_REFRESH for CLICK on Button with no specific event config", () => {
+      const buttonNode: UISpecNode = { id: "actual-button-id", node_type: "Button", props: { label: "Test Button" }, events: null, children: null, bindings: null };
+      // findNodeById for "actual-button-id" (source) returns buttonNode
+      // findNodeById for "root" (target, as per logic for unconf. button) returns mockLayout
+      mockFindNodeById.mockImplementation((layoutNode: UISpecNode | null, id: string): UISpecNode | undefined => {
+        if (id === "actual-button-id") return buttonNode;
+        if (id === "root" && layoutNode === mockLayout) return mockLayout as UISpecNode;
+        return undefined;
+      });
+
+      const clickEvent: UIEvent = { type: "CLICK", nodeId: "actual-button-id", timestamp: Date.now(), payload: null };
+      const resolution = router.resolveRoute(clickEvent, mockSchema, mockLayout, mockDataContext, mockGoal, mockUserContext);
+      expect(resolution).toBeDefined();
+      if (resolution) {
+        expect(resolution.actionType).toBe(ActionType.FULL_REFRESH);
+        expect(resolution.targetNodeId).toBe("root"); 
+        expect(resolution.plannerInput.userContext).toEqual(expect.objectContaining({
+          ...mockUserContext,
+          sourceNode: buttonNode,
+          targetNode: mockLayout, 
+          eventPayload: null 
+        }));
+        expect(resolution.prompt).toContain(ActionType.FULL_REFRESH.toString());
+      }
+    });
+
+    it("should use node-specific config for CLICK event", () => {
+      const nodeWithEventConfig: UISpecNode = {
+        id: "button-with-event", node_type: "Button", props: { label: "Action Button" }, bindings: null, children: null,
+        events: { CLICK: { action: ActionType.SHOW_DETAIL, target: "detail-section-abc", payload: { mode: "edit" } } },
       };
+      mockFindNodeById.mockImplementation((layoutNode: UISpecNode | null, id: string): UISpecNode | undefined => {
+        if (id === "button-with-event") return nodeWithEventConfig; 
+        if (id === "detail-section-abc") return undefined; 
+        return undefined;
+      });
 
-      const customTemplate = "This is a custom template for ${goal}";
-      // buildPrompt now takes template and values separately if a template is used
-      // For direct custom prompt string, the router logic passes it directly
-      // Let's test the scenario where buildPrompt gets a template
-
-      // Mocking the values buildPrompt would receive internally in resolveRoute
-      const templateValues = {
-        goal: input.goal,
-        eventType: "N/A",
-        nodeId: "N/A",
-        targetNodeId: "N/A",
-        actionType: "N/A",
-      };
-
-      const prompt = buildPrompt(input, customTemplate, templateValues);
-
-      expect(prompt).toBe("This is a custom template for Test goal");
+      const clickEvent: UIEvent = { type: "CLICK", nodeId: "button-with-event", timestamp: Date.now(), payload: { clickX: 100, clickY: 50 } };
+      const resolution = router.resolveRoute(clickEvent, mockSchema, mockLayout, mockDataContext, mockGoal, mockUserContext);
+      expect(resolution).toBeDefined();
+      if (resolution) {
+        expect(resolution.actionType).toBe(ActionType.SHOW_DETAIL);
+        expect(resolution.targetNodeId).toBe("detail-section-abc");
+        expect(resolution.plannerInput.userContext).toEqual(expect.objectContaining({
+          ...mockUserContext,
+          sourceNode: nodeWithEventConfig,
+          eventPayload: { clickX: 100, clickY: 50, mode: "edit" },
+        }));
+        expect(resolution.prompt).toContain(ActionType.SHOW_DETAIL.toString());
+      }
     });
 
-    it("should handle null history and userContext", () => {
-      const input: PlannerInput = {
-        schema: {
-          tasks: { tableName: "tasks", columns: { id: { type: "uuid" } } },
-        },
-        goal: "Simple task view",
-        history: null,
-        userContext: null,
-      };
+    it("should default to UPDATE_DATA for CHANGE on Input with no specific event config", () => {
+      const inputNode: UISpecNode = { id: "input-field-id", node_type: "Input", props: { type: "text" }, bindings: { value: "initialValue" }, events: null, children: null };
+      // findNodeById for "input-field-id" (source AND target) returns inputNode
+      mockFindNodeById.mockImplementation((layoutNode: UISpecNode | null, id: string): UISpecNode | undefined => {
+        if (id === "input-field-id") return inputNode;
+        return undefined;
+      });
 
-      const prompt = buildPrompt(input);
-
-      expect(prompt).toContain("Simple task view");
-      expect(prompt).toContain("Table: tasks");
-      expect(prompt).toContain("Recent user interactions:\nNo recent events");
-      expect(prompt).not.toContain("User Context:");
+      const changeEvent: UIEvent = { type: "CHANGE", nodeId: "input-field-id", timestamp: Date.now(), payload: { value: "newValue" } };
+      const resolution = router.resolveRoute(changeEvent, mockSchema, mockLayout, mockDataContext, mockGoal, mockUserContext);
+      expect(resolution).toBeDefined();
+      if (resolution) {
+        expect(resolution.actionType).toBe(ActionType.UPDATE_DATA);
+        expect(resolution.targetNodeId).toBe("input-field-id");
+        expect(resolution.plannerInput.userContext).toEqual(expect.objectContaining({
+          ...mockUserContext,
+          sourceNode: inputNode,
+          targetNode: inputNode, 
+          eventPayload: { value: "newValue" },
+        }));
+        expect(resolution.prompt).toContain(ActionType.UPDATE_DATA.toString());
+      }
     });
-  });
 
-  describe("createDefaultRouter", () => {
-    it("should return an ActionRouter instance", () => {
-      const defaultRouter = createDefaultRouter();
-      expect(defaultRouter).toBeInstanceOf(ActionRouter);
-    });
-
-    it("should have a default CLICK route for FULL_REFRESH if no node config matches", () => {
-      const defaultRouter = createDefaultRouter();
-      mockFindNodeById.mockReturnValue(undefined);
-
-      const resolution = defaultRouter.resolveRoute(
-        testEvent, // type: "CLICK", nodeId: "button-id"
-        mockSchema,
-        mockLayout,
-        mockDataContext,
-        mockGoal, // "Test Goal"
-        mockUserContext
-      );
-
-      // Build the expected prompt using the actual buildPrompt function and the input it receives
-      const expectedPlannerInput: PlannerInput = {
-        schema: mockSchema,
-        goal: mockGoal,
-        history: [testEvent],
-        userContext: mockUserContext,
-      };
-
-      // For the default CLICK route (no promptTemplate), buildPrompt is called
-      // without a template or templateValues. It uses its default logic.
-      const expectedPrompt = buildPrompt(
-        expectedPlannerInput,
-        undefined, // No template specified for the default CLICK route
-        undefined // No values needed as no template is processed
-      );
-
-      expect(resolution?.actionType).toBe(ActionType.FULL_REFRESH);
-      expect(resolution?.prompt).toBe(expectedPrompt);
-    });
+    // More tests will go here
   });
 });

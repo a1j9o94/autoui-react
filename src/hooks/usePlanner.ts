@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   ActionRouter,
   callPlannerLLM,
-  createDefaultRouter,
   processEvent,
   mockPlanner,
 } from "../core";
@@ -49,8 +48,8 @@ export function usePlanner(options: UsePlannerOptions): UsePlannerResult {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<Error | null>(null);
 
-  // Use provided router or create a default one
-  const router = options.router || createDefaultRouter();
+  // Use provided router or create a new deterministic one
+  const router = options.router || new ActionRouter();
 
   // Data context for bindings (simplified for now)
   const dataContext: Record<string, unknown> = {};

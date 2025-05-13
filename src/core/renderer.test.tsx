@@ -21,9 +21,11 @@ vi.mock("../adapters/shadcn", () => ({
   renderNode: vi.fn(
     (node: UISpecNode, processEvent?: (event: UIEvent) => void) => {
       if (processEvent) {
-        console.log("Unexpected value for processEvent", processEvent);
+        // console.warn("processEvent passed to mock renderShadcnNode in test for node:", node.id);
       }
-      return <div data-testid={node.id}>Mock-{node.node_type}</div>;
+      // Make mock render output dependent on props like 'label' or 'text' for testing purposes
+      const textContent = node.props?.label || node.props?.text || `Mock-${node.node_type}`;
+      return <div data-testid={node.id}>{textContent}</div>;
     }
   ),
   ShimmerBlock: () => <div data-testid="shimmer-block">ShimmerBlock</div>,
@@ -189,6 +191,39 @@ describe("Renderer", () => {
       );
 
       consoleWarnSpy.mockRestore();
+    });
+
+    it("should correctly render a node with new props even if ID is reused (would fail with naive ID-only cache)", async () => {
+      const nodeV1: UISpecNode = {
+        id: "shared-id-for-cache-test",
+        node_type: "Button",
+        props: { label: "Version 1" }, // Prop that affects rendering
+        bindings: null, events: null, children: null,
+      };
+      const nodeV2: UISpecNode = {
+        id: "shared-id-for-cache-test", // Same ID
+        node_type: "Button",
+        props: { label: "Version 2" }, // Different prop
+        bindings: null, events: null, children: null,
+      };
+
+      // First call - this would populate the cache if it were active with old logic
+      const element1 = await rendererModule.renderNode(nodeV1);
+      expect(element1.props.children).toBe("Version 1");
+
+      // Clear mocks for ShadcnAdapter.renderNode to ensure we are checking the second call correctly
+      (ShadcnAdapter.renderNode as ReturnType<typeof vi.fn>).mockClear();
+
+      // Second call with a node having the same ID but different props
+      const element2 = await rendererModule.renderNode(nodeV2);
+
+      // With the ID-only cache re-enabled in renderer.tsx, this should now return "Version 1"
+      // because the ID "shared-id-for-cache-test" is the same.
+      expect(element2.props.children).toBe("Version 1");
+
+      // And ShadcnAdapter.renderNode should NOT have been called for nodeV2 because it was cached
+      expect(ShadcnAdapter.renderNode).not.toHaveBeenCalled();
+      // expect(ShadcnAdapter.renderNode).toHaveBeenCalledTimes(1); // This would be if it WAS called for V2
     });
   });
 

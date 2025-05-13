@@ -418,8 +418,8 @@ describe("Shadcn Adapter - renderNode", () => {
     const dialogNode = createMockNode({
       id: "dialog-1",
       node_type: "Dialog",
-      props: { title: "Test Dialog" },
-      bindings: { open: true },
+      props: { title: "Test Dialog", open: true },
+      bindings: null, // Explicitly null for this test case, open state is controlled by props
       children: [dialogContent],
       events: { CLICK: { action: "close", target: "dialog-1", payload: null } }, // Using CLICK based on adapter change
     });
@@ -482,6 +482,36 @@ describe("Shadcn Adapter - renderNode", () => {
     const { getByText } = render(renderNode(textNode, mockProcessEvent));
 
     expect(getByText("Some paragraph text.")).toBeInTheDocument();
+  });
+
+  it("should not spread data prop onto DOM element for ListView", () => {
+    const childNode = createMockNode({
+      id: "child-text",
+      node_type: "Text",
+      props: { text: "List Item" },
+    });
+
+    const listViewNode = createMockNode({
+      id: "list-2",
+      node_type: "ListView",
+      props: {
+        // This 'data' prop should be consumed by the adapter and NOT forwarded to the DOM
+        data: [
+          { id: "1", name: "Item 1" },
+        ],
+        className: "list-test-class",
+      },
+      children: [childNode],
+    });
+
+    const { container } = render(renderNode(listViewNode, mockProcessEvent));
+
+    // Select the root div for this ListView via data-id that adapter always sets
+    const listDiv = container.querySelector('[data-id="list-2"]');
+
+    expect(listDiv).toBeInTheDocument();
+    // The problematic attribute should be absent now
+    expect(listDiv).not.toHaveAttribute("data");
   });
 
   // More tests can be added for other components (Header, etc.)

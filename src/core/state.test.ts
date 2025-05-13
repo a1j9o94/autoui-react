@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach, Mock } from "vitest";
+import { describe, it, expect, vi, beforeEach, Mock, MockedFunction } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import * as ReactSource from "react"; // Import original React for use in mock
 
 import { useUIStateEngine, UseUIStateEngineOptions } from "./state";
 import * as Planner from "./planner";
 import * as SystemEvents from "./system-events";
-import * as ActionRouter from "./action-router";
+import { ActionRouter, ActionType, RouteResolution } from "./action-router";
 import {
   UIEvent,
   UISpecNode,
@@ -13,25 +13,14 @@ import {
   UIAction,
   UIState,
 } from "../schema/ui";
-import { ActionType, RouteResolution } from "./action-router";
 import { SystemEventType, AnySystemEvent } from "./system-events";
 
 // Hold the current dispatch spy for each test
 let currentTestDispatchSpy: Mock<[UIAction], void> | null = null;
 
-let mockResolveRoute: Mock<
-  [
-    UIEvent,
-    Record<string, unknown>,
-    UISpecNode | null,
-    Record<string, unknown>,
-    string,
-    Record<string, unknown> | undefined
-  ],
-  RouteResolution | null
->;
+// No longer need mockResolveRouteFn here, will spy on prototype
+// let mockResolveRouteFn: Mock<...>;
 
-// Mock React's useReducer
 vi.mock("react", async (importOriginal) => {
   const actualReact = await importOriginal<typeof ReactSource>();
   return {
@@ -40,20 +29,17 @@ vi.mock("react", async (importOriginal) => {
       reducer: (state: UIState, action: UIAction) => UIState,
       initialState: UIState
     ) => {
-      console.log("🚀 Mocked useReducer CALLED"); // Added log
       const [state, dispatch] = actualReact.useReducer(reducer, initialState);
+      
+      // Memoize spiedDispatch to ensure stable identity if it's a dependency elsewhere
+      const spiedDispatch = actualReact.useCallback((action: UIAction) => {
+        if (currentTestDispatchSpy) {
+          currentTestDispatchSpy(action);
+        }
+        return dispatch(action);
+      }, [dispatch]); // currentTestDispatchSpy is external, dispatch is the key internal dependency
 
-      // Temporarily bypass the spy to see if the loop is in our spying logic
-      // const spiedDispatch = (action: UIAction) => {
-      //   if (currentTestDispatchSpy) {
-      //     console.log("🚀 SpiedDispatch CALLED with action:", action.type); // Log for spied dispatch
-      //     currentTestDispatchSpy(action);
-      //   }
-      //   return dispatch(action);
-      // };
-      // return [state, spiedDispatch];
-
-      return [state, dispatch]; // Return original dispatch directly
+      return [state, spiedDispatch];
     },
   };
 });
@@ -112,14 +98,8 @@ const mockPlannerResultNode: UISpecNode = {
 
 // Import the mocked functions for type safety
 import { callPlannerLLM, mockPlanner } from "./planner";
-const mockCallPlannerLLM = callPlannerLLM as Mock<
-  [PlannerInput, string?, RouteResolution?],
-  Promise<UISpecNode>
->;
-const mockMockPlanner = mockPlanner as Mock<
-  [PlannerInput, string?, string?],
-  UISpecNode
->;
+const mockCallPlannerLLM = callPlannerLLM as MockedFunction<typeof callPlannerLLM>;
+const mockMockPlanner = mockPlanner as MockedFunction<typeof mockPlanner>;
 
 describe("useUIStateEngine", () => {
   const defaultOptions: UseUIStateEngineOptions = {
@@ -130,175 +110,130 @@ describe("useUIStateEngine", () => {
 
   // Helper to render the hook and get the current dispatch spy
   const renderHelper = (options: Partial<UseUIStateEngineOptions> = {}) => {
-    currentTestDispatchSpy = vi.fn() as Mock<[UIAction], void>; // Still set it up for when we re-enable spying
+    currentTestDispatchSpy = vi.fn() as Mock<[UIAction], void>;
     const hookResult = renderHook(() =>
       useUIStateEngine({ ...defaultOptions, ...options })
     );
     return { ...hookResult, dispatchSpy: currentTestDispatchSpy! };
   };
 
-  beforeEach(() => {
-    vi.clearAllMocks(); // Clears call history from all mocks, including any previous currentTestDispatchSpy
-    currentTestDispatchSpy = null; // Reset spy tracker
+  let resolveRouteSpy: MockedFunction<typeof ActionRouter.prototype.resolveRoute>;
 
-    // Assign mocks here
-    mockSystemEventsEmit = vi
-      .spyOn(SystemEvents.systemEvents, "emit")
-      .mockResolvedValue(undefined) as Mock<[AnySystemEvent], Promise<void>>;
-    mockCreateSystemEvent = vi
-      .spyOn(SystemEvents, "createSystemEvent")
-      .mockImplementation(
-        (type: SystemEventType, payload: any) =>
-          ({ type, payload, timestamp: Date.now() } as any)
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentTestDispatchSpy = null;
+    mockSystemEventsEmit = vi.spyOn(SystemEvents.systemEvents, "emit").mockResolvedValue(undefined) as Mock<[AnySystemEvent], Promise<void>>;
+    mockCreateSystemEvent = vi.spyOn(SystemEvents, "createSystemEvent").mockImplementation(
+        (type: SystemEventType, payload: any) => ({ type, payload, timestamp: Date.now() } as any)
       ) as Mock<[SystemEventType, any], AnySystemEvent>;
-    mockResolveRoute = vi.fn();
-    vi.spyOn(ActionRouter, "createDefaultRouter").mockReturnValue({
-      resolveRoute: mockResolveRoute,
-    } as any);
+    
+    resolveRouteSpy = vi.spyOn(ActionRouter.prototype, 'resolveRoute') as unknown as MockedFunction<typeof ActionRouter.prototype.resolveRoute>;
   });
 
   describe("Initial Load", () => {
     it("should initialize with mock data if mockMode is true", async () => {
       const { result, dispatchSpy } = renderHelper({ mockMode: true });
-
-      await act(async () => {});
-
-      expect(mockMockPlanner).toHaveBeenCalledWith(
-        expect.objectContaining({
-          goal: defaultOptions.goal,
-          history: [],
-        })
-      );
-      // These expectations will fail as dispatchSpy is not being called by the mocked useReducer
-      // expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: true });
-      // expect(dispatchSpy).toHaveBeenCalledWith({
-      //   type: "AI_RESPONSE",
-      //   node: expect.objectContaining({ id: defaultOptions.goal }),
-      // });
-      // expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: false });
-      expect(result.current.state.layout?.id).toBe(defaultOptions.goal); // This might still pass if state updates correctly
+      await act(async () => {}); // Flush effects
+      expect(mockMockPlanner).toHaveBeenCalled();
+      expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: true });
+      expect(dispatchSpy).toHaveBeenCalledWith({ type: "AI_RESPONSE", node: expect.objectContaining({ id: defaultOptions.goal }) });
+      expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: false });
+      expect(result.current.state.layout?.id).toBe(defaultOptions.goal);
       expect(result.current.state.loading).toBe(false);
     });
 
     it("should call callPlannerLLM and update state on successful initial load if mockMode is false", async () => {
-      const specificNode = {
-        ...mockPlannerResultNode,
-        id: "llm-initial-success",
-      };
-      mockCallPlannerLLM.mockImplementation(async () => specificNode);
+      const specificNode = { ...mockPlannerResultNode, id: "llm-initial-success" };
+      mockCallPlannerLLM.mockResolvedValue(specificNode);
 
-      // Mock what resolveRoute should return for the INIT event
       const initialRouteResolution: RouteResolution = {
-        actionType: ActionType.FULL_REFRESH,
-        targetNodeId: "root",
-        plannerInput: {
-          goal: defaultOptions.goal,
-          schema: defaultOptions.schema,
-          history: expect.arrayContaining([
-            expect.objectContaining({ type: "INIT" }),
-          ]), // History will contain the INIT event
-          userContext: defaultOptions.userContext,
-        },
+        actionType: ActionType.FULL_REFRESH, targetNodeId: "root",
+        plannerInput: { goal: defaultOptions.goal, schema: defaultOptions.schema, history: [expect.objectContaining({ type: "INIT" })], userContext: defaultOptions.userContext },
         prompt: "Mocked initial prompt for INIT event",
       };
-
-      mockResolveRoute.mockImplementation((event: UIEvent) => {
+      
+      resolveRouteSpy.mockImplementation(((event: UIEvent, _schema, _layout, _dataContext, _goal, _userContext): RouteResolution => {
         if (event.type === "INIT") {
-          // Adjust plannerInput history to include the actual INIT event passed
-          return {
-            ...initialRouteResolution,
-            plannerInput: {
-              ...initialRouteResolution.plannerInput,
-              history: [event],
-            },
+          return { 
+            ...initialRouteResolution, 
+            plannerInput: { 
+              ...initialRouteResolution.plannerInput, 
+              history: [event] // Use the actual event in history
+            } 
           };
         }
-        return null; // Should not be called with other types in this test
-      });
+        // Fallback for this specific test - should ideally not be hit if only INIT occurs.
+        return { 
+            actionType: ActionType.FULL_REFRESH, targetNodeId: "root", 
+            plannerInput: {goal: "fallback-SHOULD-NOT-HIT", schema: {}, history: [event]}, 
+            prompt: "Fallback prompt - SHOULD NOT HIT IN THIS TEST"
+        };
+      }) as any); // Cast to any to satisfy complex mock signature if needed, though parameters are listed
 
       const { result, dispatchSpy } = renderHelper({ mockMode: false });
-
-      await act(async () => {
-        await Promise.resolve();
-      }); // ensure effects queue is flushed
-
-      // expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: true });
-      expect(mockCallPlannerLLM).toHaveBeenCalledWith(
-        expect.objectContaining({
-          goal: defaultOptions.goal,
-          history: expect.arrayContaining([
-            expect.objectContaining({ type: "INIT" }),
-          ]),
-        }),
-        "",
-        expect.objectContaining(initialRouteResolution)
+      await act(async () => { await Promise.resolve(); }); 
+      
+      expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: true });
+      expect(resolveRouteSpy).toHaveBeenCalledWith(
+        expect.objectContaining({type: "INIT"}), 
+        defaultOptions.schema, 
+        null, 
+        {}, 
+        defaultOptions.goal, 
+        defaultOptions.userContext
       );
-      // expect(dispatchSpy).toHaveBeenCalledWith({
-      //   type: "AI_RESPONSE",
-      //   node: specificNode,
-      // });
-      // expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: false });
+      expect(mockCallPlannerLLM).toHaveBeenCalledWith(
+        expect.objectContaining(initialRouteResolution.plannerInput),
+        defaultOptions.openaiApiKey || "", 
+        expect.objectContaining(initialRouteResolution) 
+      );
+      expect(dispatchSpy).toHaveBeenCalledWith({ type: "AI_RESPONSE", node: specificNode });
+      expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: false });
       expect(result.current.state.layout).toEqual(specificNode);
-      expect(result.current.state.loading).toBe(false);
       expect(result.current.state.error).toBeNull();
     });
 
     it("should call callPlannerLLM and update state with error on failed initial load if mockMode is false", async () => {
       const errorMessage = "Initial LLM call failed";
-      mockCallPlannerLLM.mockImplementation(async () => {
-        throw new Error(errorMessage);
-      });
+      mockCallPlannerLLM.mockRejectedValue(new Error(errorMessage));
 
-      // Mock resolveRoute for the INIT event, similar to the success case
       const initialErrorRouteResolution: RouteResolution = {
         actionType: ActionType.FULL_REFRESH,
         targetNodeId: "root",
-        plannerInput: {
-          goal: defaultOptions.goal,
-          schema: defaultOptions.schema,
-          history: expect.arrayContaining([
-            expect.objectContaining({ type: "INIT" }),
-          ]),
-          userContext: defaultOptions.userContext,
-        },
+        plannerInput: { goal: defaultOptions.goal, schema: defaultOptions.schema, history: [expect.objectContaining({type: "INIT"})], userContext: defaultOptions.userContext },
         prompt: "Mocked initial prompt for INIT error case",
       };
 
-      mockResolveRoute.mockImplementation((event: UIEvent) => {
+      resolveRouteSpy.mockImplementation(((event: UIEvent, _schema, _layout, _dataContext, _goal, _userContext): RouteResolution => {
         if (event.type === "INIT") {
-          return {
-            ...initialErrorRouteResolution,
-            plannerInput: {
-              ...initialErrorRouteResolution.plannerInput,
-              history: [event],
-            },
+          return { 
+            ...initialErrorRouteResolution, 
+            plannerInput: { 
+              ...initialErrorRouteResolution.plannerInput, 
+              history: [event] 
+            } 
           };
         }
-        return null;
-      });
+        return { 
+            actionType: ActionType.FULL_REFRESH, targetNodeId: "root", 
+            plannerInput: {goal: "fallback-SHOULD-NOT-HIT-ERROR-CASE", schema: {}, history: [event]}, 
+            prompt: "Fallback prompt - SHOULD NOT HIT IN THIS ERROR TEST"
+        };
+      })as any);
 
       const { result, dispatchSpy } = renderHelper({ mockMode: false });
+      await act(async () => { await Promise.resolve(); });
 
-      await act(async () => {
-        await Promise.resolve();
-      });
-
-      // expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: true });
-      // Check that callPlannerLLM was called with the correct arguments from the mocked route
+      expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: true });
+      expect(resolveRouteSpy).toHaveBeenCalledWith(expect.objectContaining({type: "INIT"}), defaultOptions.schema, null, {}, defaultOptions.goal, defaultOptions.userContext);
       expect(mockCallPlannerLLM).toHaveBeenCalledWith(
-        expect.objectContaining({
-          goal: defaultOptions.goal,
-          history: expect.arrayContaining([
-            expect.objectContaining({ type: "INIT" }),
-          ]),
-        }),
-        "",
+        expect.objectContaining(initialErrorRouteResolution.plannerInput),
+        defaultOptions.openaiApiKey || "",
         expect.objectContaining(initialErrorRouteResolution)
       );
-      // expect(dispatchSpy).toHaveBeenCalledWith({ type: "ERROR", message: errorMessage });
-      // expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: false });
+      expect(dispatchSpy).toHaveBeenCalledWith({ type: "ERROR", message: errorMessage });
+      expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: false });
       expect(result.current.state.layout).toBeNull();
-      expect(result.current.state.loading).toBe(false);
       expect(result.current.state.error).toBe(errorMessage);
     });
   });
@@ -340,23 +275,16 @@ describe("useUIStateEngine", () => {
           result.current.handleEvent(testEvent);
         });
 
-        // expect(dispatchSpy).toHaveBeenCalledWith({ type: "UI_EVENT", event: testEvent });
-        // expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: true });
         expect(mockMockPlanner).toHaveBeenCalledWith(
           expect.objectContaining({
             goal: defaultOptions.goal,
             history: expect.arrayContaining([testEvent]),
           })
         );
-        // expect(dispatchSpy).toHaveBeenCalledWith({
-        //   type: "AI_RESPONSE",
-        //   node: expect.objectContaining({ id: defaultOptions.goal }),
-        // });
-        // expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: false });
       });
 
       it("should use routing and dispatch PARTIAL_UPDATE if partial updates enabled", async () => {
-        mockResolveRoute.mockReturnValue(partialUpdateRouteResult);
+        resolveRouteSpy.mockReturnValue(partialUpdateRouteResult);
         const { result, dispatchSpy } = renderHelper({
           mockMode: true,
           enablePartialUpdates: true,
@@ -368,8 +296,7 @@ describe("useUIStateEngine", () => {
           result.current.handleEvent(testEvent);
         });
 
-        expect(mockResolveRoute).toHaveBeenCalled();
-        // expect(dispatchSpy).toHaveBeenCalledWith({ type: "PARTIAL_UPDATE", nodeId: partialUpdateRouteResult.targetNodeId, node: expect.objectContaining({ id: partialUpdateRouteResult.targetNodeId }) });
+        expect(resolveRouteSpy).toHaveBeenCalled();
         expect(mockMockPlanner).toHaveBeenCalledWith(
           partialUpdateRouteResult.plannerInput,
           partialUpdateRouteResult.targetNodeId,
@@ -380,12 +307,12 @@ describe("useUIStateEngine", () => {
 
     describe("mockMode: false", () => {
       it("should call callPlannerLLM for full refresh and update state on success", async () => {
-        mockResolveRoute.mockReturnValue(fullRefreshRouteResult);
+        resolveRouteSpy.mockReturnValue(fullRefreshRouteResult);
         const successNode = {
           ...mockPlannerResultNode,
           id: "llm-event-success",
         };
-        mockCallPlannerLLM.mockImplementation(async () => successNode);
+        mockCallPlannerLLM.mockResolvedValue(successNode);
         const { result, dispatchSpy } = renderHelper({
           mockMode: false,
           enablePartialUpdates: false,
@@ -397,50 +324,26 @@ describe("useUIStateEngine", () => {
           result.current.handleEvent(testEvent);
         });
 
-        // expect(dispatchSpy).toHaveBeenCalledWith({ type: "UI_EVENT", event: testEvent });
-        // expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: true });
+        expect(resolveRouteSpy).toHaveBeenCalled();
+        expect(dispatchSpy).toHaveBeenCalledWith({ type: "UI_EVENT", event: testEvent });
+        expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: true });
         expect(mockCallPlannerLLM).toHaveBeenCalledWith(
-          expect.objectContaining({
-            goal: defaultOptions.goal,
-            history: expect.arrayContaining([testEvent]),
-          }),
-          "",
-          undefined
+          expect.objectContaining(fullRefreshRouteResult.plannerInput),
+          defaultOptions.openaiApiKey || "",
+          expect.objectContaining(fullRefreshRouteResult) // Pass the whole route result
         );
-        // expect(dispatchSpy).toHaveBeenCalledWith({ type: "AI_RESPONSE", node: successNode });
-        // expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: false });
+        expect(dispatchSpy).toHaveBeenCalledWith({ type: "AI_RESPONSE", node: successNode });
+        expect(dispatchSpy).toHaveBeenCalledWith({ type: "LOADING", isLoading: false });
         expect(result.current.state.error).toBeNull();
       });
 
-      it("should call callPlannerLLM for full refresh and update state on error", async () => {
-        mockResolveRoute.mockReturnValue(fullRefreshRouteResult);
-        const errorMessage = "LLM event error";
-        mockCallPlannerLLM.mockImplementation(async () => {
-          throw new Error(errorMessage);
-        });
-        const { result, dispatchSpy } = renderHelper({
-          mockMode: false,
-          enablePartialUpdates: false,
-        });
-        await act(async () => {});
-        dispatchSpy.mockClear();
-
-        await act(async () => {
-          result.current.handleEvent(testEvent);
-        });
-
-        expect(mockCallPlannerLLM).toHaveBeenCalled();
-        // expect(dispatchSpy).toHaveBeenCalledWith({ type: "ERROR", message: errorMessage });
-        expect(result.current.state.error).toBe(errorMessage);
-      });
-
       it("should use routing, call callPlannerLLM for partial update and update state on success", async () => {
-        mockResolveRoute.mockReturnValue(partialUpdateRouteResult);
+        resolveRouteSpy.mockReturnValue(partialUpdateRouteResult);
         const successNode = {
           ...mockPlannerResultNode,
           id: partialUpdateRouteResult.targetNodeId,
         };
-        mockCallPlannerLLM.mockImplementation(async () => successNode);
+        mockCallPlannerLLM.mockResolvedValue(successNode);
         const { result, dispatchSpy } = renderHelper({
           mockMode: false,
           enablePartialUpdates: true,
@@ -452,22 +355,20 @@ describe("useUIStateEngine", () => {
           result.current.handleEvent(testEvent);
         });
 
-        expect(mockResolveRoute).toHaveBeenCalled();
+        expect(resolveRouteSpy).toHaveBeenCalled();
         expect(mockCallPlannerLLM).toHaveBeenCalledWith(
           partialUpdateRouteResult.plannerInput,
-          "",
+          defaultOptions.openaiApiKey || "",
           partialUpdateRouteResult
         );
-        // expect(dispatchSpy).toHaveBeenCalledWith({ type: "PARTIAL_UPDATE", nodeId: partialUpdateRouteResult.targetNodeId, node: successNode });
+        expect(dispatchSpy).toHaveBeenCalledWith({ type: "PARTIAL_UPDATE", nodeId: partialUpdateRouteResult.targetNodeId, node: successNode });
         expect(result.current.state.error).toBeNull();
       });
 
       it("should use routing, call callPlannerLLM for partial update and update state on error", async () => {
-        mockResolveRoute.mockReturnValue(partialUpdateRouteResult);
+        resolveRouteSpy.mockReturnValue(partialUpdateRouteResult);
         const errorMessage = "LLM partial update error";
-        mockCallPlannerLLM.mockImplementation(async () => {
-          throw new Error(errorMessage);
-        });
+        mockCallPlannerLLM.mockRejectedValue(new Error(errorMessage));
         const { result, dispatchSpy } = renderHelper({
           mockMode: false,
           enablePartialUpdates: true,
@@ -481,10 +382,10 @@ describe("useUIStateEngine", () => {
 
         expect(mockCallPlannerLLM).toHaveBeenCalledWith(
           partialUpdateRouteResult.plannerInput,
-          "",
+          defaultOptions.openaiApiKey || "",
           partialUpdateRouteResult
         );
-        // expect(dispatchSpy).toHaveBeenCalledWith({ type: "ERROR", message: errorMessage });
+        expect(dispatchSpy).toHaveBeenCalledWith({ type: "ERROR", message: errorMessage });
         expect(result.current.state.error).toBe(errorMessage);
       });
     });

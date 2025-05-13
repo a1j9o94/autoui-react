@@ -2,7 +2,6 @@
 export {
   ActionRouter,
   ActionType,
-  createDefaultRouter,
   type ActionRouteConfig,
 } from "./core/action-router";
 

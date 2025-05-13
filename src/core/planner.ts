@@ -296,6 +296,22 @@ export async function processEvent(
 ): Promise<UISpecNode> {
   // const startTime = Date.now(); // Commented out as it's currently unused
 
+  // Log the layout that processEvent received
+  console.log(`[Planner.processEvent] Received event for nodeId: ${event.nodeId}`);
+  if (layout) {
+    const taskListViewNode = layout.children?.find(c => c.id === 'taskListView' || c.id === 'task-list-view');
+    let taskListViewChildrenSnapshot = null;
+    if (taskListViewNode && taskListViewNode.children) {
+      taskListViewChildrenSnapshot = taskListViewNode.children.map(child => ({ 
+        id: child.id, 
+        children: child.children?.map(grandChild => ({id: grandChild.id, props: grandChild.props, events: grandChild.events})) 
+      }));
+    }
+    console.log(`[Planner.processEvent] Layout snapshot (taskListView children):`, JSON.stringify(taskListViewChildrenSnapshot, null, 2));
+  } else {
+    console.log(`[Planner.processEvent] Layout is undefined.`);
+  }
+
   const routeResolution = await router.resolveRoute(
     event,
     schema,

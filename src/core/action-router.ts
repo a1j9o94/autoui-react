@@ -12,10 +12,11 @@ UI Guidance:
 3. Include navigation between related views when needed
 4. Keep the interface simple and intuitive
 5. Bind to schema data where appropriate
-6. Provide event handlers for user interactions - make sure to always include both action and target properties`;
+6. **CRITICAL for Buttons:** All \`Button\` nodes **MUST** include a \`label\` property in their \`props\` (e.g., \`{ "props": { "label": "Click Me" } }\`).
+7. Provide event handlers for user interactions - make sure to always include both action and target properties`;
 
 // Specific guidance for list bindings
-const LIST_BINDING_GUIDANCE = `7. **CRITICAL:** For \`ListView\` or \`Table\` nodes, the \`data\` binding key **MUST** point to the *exact path* of the data *array* within the context.`;
+const LIST_BINDING_GUIDANCE = `8. **CRITICAL:** For \`ListView\` or \`Table\` nodes, the \`data\` binding key **MUST** point to the *exact path* of the data *array* within the context.`;
 
 // Example for list binding
 const LIST_BINDING_EXAMPLE = `Example: If the context has \`{ tasks: { data: [...] } }\`, the binding **MUST** be \`{ "bindings": { "data": "tasks.data" } }\`. If the context has \`{ userList: [...] }\`, the binding **MUST** be \`{ "bindings": { "data": "userList" } }\`. **NEVER** bind to the parent object containing the array (e.g., DO NOT USE \`{ "bindings": { "data": "tasks" } }\`).`;
@@ -139,6 +140,7 @@ Respond ONLY with the JSON UI specification and no other text.
 export enum ActionType {
   FULL_REFRESH = "FULL_REFRESH", // Generate a completely new UI
   UPDATE_NODE = "UPDATE_NODE", // Update a specific node, potentially with new children
+  UPDATE_DATA = "UPDATE_DATA", // Add this for input changes
   ADD_DROPDOWN = "ADD_DROPDOWN", // Add a dropdown to a specific node
   SHOW_DETAIL = "SHOW_DETAIL", // Show a detail view
   HIDE_DETAIL = "HIDE_DETAIL", // Hide a detail view
@@ -171,19 +173,9 @@ export interface RouteResolution {
  * Action router class - handles determining what part of the UI to update
  */
 export class ActionRouter {
-  private routes: Record<string, ActionRouteConfig[]> = {};
-
-  /**
-   * Register a new action route
-   * @param eventType - UI event type to route
-   * @param config - Route configuration
-   */
-  public registerRoute(eventType: string, config: ActionRouteConfig): void {
-    if (!this.routes[eventType]) {
-      this.routes[eventType] = [];
-    }
-
-    this.routes[eventType].push(config);
+  constructor() {
+    // this.registerRoute("CLICK",    { actionType: ActionType.FULL_REFRESH, targetNodeId: "root" });
+    // this.registerRoute("INIT",     { actionType: ActionType.FULL_REFRESH, targetNodeId: "root" });
   }
 
   /**
@@ -200,148 +192,167 @@ export class ActionRouter {
     dataContext: DataContext,
     goal: string,
     userContext?: Record<string, unknown>
-  ): RouteResolution | null {
+  ): RouteResolution {
     console.log(
-      `[ActionRouter Debug] resolveRoute called for event type: ${event.type}`
+      `[ActionRouter Debug] resolveRoute called for event type: ${event.type}, nodeId: ${event.nodeId}`
     );
-    // Get all routes for this event type
-    const routes = this.routes[event.type] || [];
-
-    console.log(
-      `[ActionRouter Debug] Found ${routes.length} routes for ${event.type}`
-    );
-
-    if (routes.length === 0) {
-      // Default to full refresh if no routes defined
-      console.log(
-        `[ActionRouter Debug] No specific route found for ${event.type}, using default FULL_REFRESH.`
-      );
-      const defaultPlannerInput = {
-        schema,
-        goal,
-        history: [event],
-        userContext: userContext || null,
-      };
-      const defaultPrompt = buildPrompt(
-        defaultPlannerInput,
-        undefined,
-        undefined
-      );
-      const defaultResolution = {
-        actionType: ActionType.FULL_REFRESH,
-        targetNodeId: layout?.id || "root",
-        plannerInput: defaultPlannerInput,
-        prompt: defaultPrompt,
-      };
-      console.log(
-        "[ActionRouter Debug] Default Resolution:",
-        defaultResolution
-      );
-      return defaultResolution;
+    // ADD THIS LOG: Be very specific about what part of the layout to log to avoid excessively large logs.
+    // We are interested in the children of the taskListView node, if it exists and has children.
+    const taskListViewNode = layout?.children?.find(c => c.id === 'taskListView' || c.id === 'task-list-view');
+    let taskListViewChildrenSnapshot = null;
+    if (taskListViewNode && taskListViewNode.children) {
+      taskListViewChildrenSnapshot = taskListViewNode.children.map(child => ({ id: child.id, children: child.children?.map(grandChild => ({id: grandChild.id, props: grandChild.props, bindings: grandChild.bindings, events: grandChild.events })) })); // Include grandchildren details
     }
+    console.log(`[ActionRouter Debug] Searching for nodeId: ${event.nodeId} in taskListView children (snapshot):`, JSON.stringify(taskListViewChildrenSnapshot, null, 2));
 
-    // Try to find source node
     const sourceNode = layout ? findNodeById(layout, event.nodeId) : undefined;
-
-    // Get the node configuration if available
     const nodeConfig = sourceNode?.events?.[event.type];
 
-    // Try to find a matching route based on node configuration
-    let matchingRoute: ActionRouteConfig | undefined;
+    let actionType: ActionType;
+    let determinedTargetNodeId: string;
+    let promptTemplate: string | undefined = undefined;
+    let contextKeys: string[] | undefined = undefined;
+    let determinedNodeConfigPayload: Record<string, unknown> | null = null;
 
-    if (nodeConfig) {
-      matchingRoute = routes.find(
-        (route) => route.actionType.toString() === nodeConfig.action
-      );
-    }
+    // Determine action, targetNodeId, and template based on event and node config
+    if (nodeConfig?.action) {
+      actionType = nodeConfig.action as ActionType;
+      determinedTargetNodeId = nodeConfig.target || sourceNode?.id || "root";
+      determinedNodeConfigPayload = nodeConfig.payload ? { ...nodeConfig.payload } : null;
 
-    // If no match via node configuration, use the first route
-    if (!matchingRoute) {
-      matchingRoute = routes[0];
-    }
+      // Ensure SHOW_DIALOG from event config is mapped to ActionType.SHOW_DETAIL for routing logic
+      if (nodeConfig.action === "SHOW_DIALOG") { 
+        actionType = ActionType.SHOW_DETAIL;
+      }
 
-    console.log("[ActionRouter Debug] Matching Route Config:", matchingRoute);
-
-    // Resolve target node ID
-    const targetNodeId =
-      nodeConfig?.target || matchingRoute.targetNodeId || event.nodeId;
-
-    // Build additional context
-    const additionalContext: Record<string, unknown> = {};
-
-    if (matchingRoute.contextKeys) {
-      matchingRoute.contextKeys.forEach((key) => {
-        additionalContext[key] = dataContext[key];
-      });
-    }
-
-    // Add source node info
-    if (sourceNode) {
-      additionalContext.sourceNode = sourceNode;
-    }
-
-    // Add target node info if available
-    if (layout) {
-      const targetNode = findNodeById(layout, targetNodeId);
-      if (targetNode) {
-        additionalContext.targetNode = targetNode;
+      if (actionType === ActionType.SHOW_DETAIL) {
+        // Ensure template refers to selectedTask which is set by executeAction("SHOW_DIALOG",...)
+        promptTemplate = "Action: ${actionType}. Show detail for ${nodeId} (source of event) which targets dialog ${targetNodeId}. Selected Task ID: ${selectedTask_id}";
+        contextKeys = ["selectedTask"]; // Ensure this matches what executeAction sets
+      } else if (actionType === ActionType.NAVIGATE) {
+        promptTemplate = "Action: ${actionType}. Navigate from ${nodeId} to view: ${targetNodeId}";
+      } else {
+        promptTemplate = "Action: ${actionType}. Event ${eventType} on node ${nodeId}. Target: ${targetNodeId}. Goal: ${goal}";
+      }
+    } else {
+      // Default behaviors if no specific nodeConfig.action
+      switch (event.type) {
+        case "INIT":
+          actionType = ActionType.FULL_REFRESH;
+          determinedTargetNodeId = "root";
+          promptTemplate = "Action: ${actionType}. Initialize the application view for the goal: ${goal}";
+          break;
+        case "CLICK":
+          actionType = ActionType.FULL_REFRESH;
+          determinedTargetNodeId = "root"; // Default for unconfigured clicks (button or otherwise)
+          if (sourceNode?.node_type === "Button") {
+            promptTemplate = "Action: ${actionType}. Button ${nodeId} clicked. Goal: ${goal}";
+          } else {
+            promptTemplate = "Action: ${actionType}. Generic click on ${nodeId}. Goal: ${goal}";
+          }
+          break;
+        case "CHANGE":
+          if (sourceNode && ["Input", "Select", "Textarea", "Checkbox", "RadioGroup"].includes(sourceNode.node_type)) {
+            actionType = ActionType.UPDATE_DATA;
+            determinedTargetNodeId = sourceNode.id; 
+            promptTemplate = "Action: ${actionType}. Update data for ${nodeId} due to change. New value: ${eventPayload_value}. Goal: ${goal}";
+          } else {
+            actionType = ActionType.FULL_REFRESH;
+            determinedTargetNodeId = "root";
+            promptTemplate = "Action: ${actionType}. Change event on ${nodeId}. Goal: ${goal}";
+          }
+          break;
+        default:
+          actionType = ActionType.FULL_REFRESH;
+          determinedTargetNodeId = "root";
+          promptTemplate = "Action: ${actionType}. Unhandled event ${eventType} on ${nodeId}. Goal: ${goal}";
+          console.warn(
+            `[ActionRouter] Unhandled event type: ${event.type} for node ${event.nodeId}, falling back to FULL_REFRESH.`
+          );
+          break;
       }
     }
 
-    // Add event payload
-    if (event.payload) {
-      additionalContext.eventPayload = event.payload;
+    // Assemble additionalContext for plannerInput.userContext
+    const additionalContext: Record<string, unknown> = {};
+    if (sourceNode) {
+      additionalContext.sourceNode = sourceNode;
     }
+    // Determine and add targetNode to context if found
+    const targetNode = layout ? findNodeById(layout, determinedTargetNodeId) : undefined;
+    if (targetNode) {
+      additionalContext.targetNode = targetNode;
+    }
+    // Note: if targetNode is not found, additionalContext.targetNode will remain undefined (not explicitly set to undefined)
 
-    // Merge context with any payload from node config
-    if (nodeConfig?.payload) {
-      Object.entries(nodeConfig.payload).forEach(([key, value]) => {
-        additionalContext[key] = value;
+    if (contextKeys) {
+      contextKeys.forEach((key) => {
+        if (dataContext[key] !== undefined) {
+          additionalContext[key] = dataContext[key];
+        }
       });
     }
 
-    // Build planner input
+    let finalEventPayload: Record<string, unknown> | null = null;
+    if (event.payload && Object.keys(event.payload).length > 0) {
+      finalEventPayload = { ...event.payload };
+    }
+    if (determinedNodeConfigPayload) {
+      finalEventPayload = { ...(finalEventPayload || {}), ...determinedNodeConfigPayload };
+    }
+    // Set eventPayload in additionalContext: null if both inputs were null/empty, otherwise the merged object.
+    if (finalEventPayload) {
+      additionalContext.eventPayload = finalEventPayload;
+    } else if (event.payload === null && (determinedNodeConfigPayload === null || Object.keys(determinedNodeConfigPayload).length === 0) ) {
+      additionalContext.eventPayload = null;
+    }
+    // If both event.payload and determinedNodeConfigPayload were undefined or empty objects, 
+    // finalEventPayload would be null or {}, and additionalContext.eventPayload would not be set by the above,
+    // which is fine as it means no payload.
+
     const plannerInput: PlannerInput = {
       schema,
       goal,
       history: [event],
       userContext: {
-        ...userContext,
+        ...(userContext || {}),
         ...additionalContext,
       },
     };
 
-    // Process prompt template
-    const templateValues = {
+    const templateValues: Record<string, unknown> = {
       goal,
       eventType: event.type,
-      nodeId: event.nodeId,
-      targetNodeId,
-      actionType: matchingRoute.actionType,
-      ...(userContext || {}), // Spread the original userContext (passed to resolveRoute)
-      ...additionalContext, // Spread additionalContext afterwards (can override userContext keys)
+      nodeId: event.nodeId, 
+      targetNodeId: determinedTargetNodeId, // Use the consistently determined targetNodeId
+      actionType: actionType.toString(),
+      ...(userContext || {}),
+      ...additionalContext,
     };
-
-    console.log("[ActionRouter Debug] Template Values:", templateValues);
-
-    // Generate final prompt using buildPrompt
-    // It will use the template if provided, otherwise generate the default based on plannerInput.
+    
+    if (typeof additionalContext.eventPayload === 'object' && additionalContext.eventPayload !== null) {
+        for (const [key, value] of Object.entries(additionalContext.eventPayload)) {
+            templateValues[`eventPayload_${key}`] = value;
+        }
+    }
+    if (additionalContext.selectedItem && typeof additionalContext.selectedItem === 'object' && additionalContext.selectedItem !== null) {
+        for (const [key, value] of Object.entries(additionalContext.selectedItem)) {
+            templateValues[`selectedItem_${key}`] = value; 
+        }
+    }
+    
     const finalPrompt = buildPrompt(
       plannerInput,
-      matchingRoute.promptTemplate, // Pass template if it exists (can be undefined)
-      templateValues // Pass templateValues (used only if promptTemplate exists)
+      promptTemplate, 
+      templateValues
     );
-    console.log("[ActionRouter Debug] Generated Prompt:", finalPrompt);
 
-    const finalResolution = {
-      actionType: matchingRoute.actionType,
-      targetNodeId: targetNodeId,
+    return {
+      actionType,
+      targetNodeId: determinedTargetNodeId, // Return the consistently determined targetNodeId
       plannerInput,
-      prompt: finalPrompt, // Use the generated prompt
+      prompt: finalPrompt,
     };
-
-    console.log("[ActionRouter Debug] Final Resolution:", finalResolution);
-    return finalResolution;
   }
 
   /**
@@ -360,62 +371,6 @@ export class ActionRouter {
   }
 }
 
-// Create a default router with common routes
-export function createDefaultRouter(): ActionRouter {
-  const router = new ActionRouter();
-
-  // Register a default route for CLICK events (will generate a full refresh prompt)
-  router.registerRoute("CLICK", {
-    actionType: ActionType.FULL_REFRESH,
-    targetNodeId: "root",
-  });
-
-  // Default route for INIT event (typically the first event)
-  router.registerRoute("INIT", {
-    actionType: ActionType.FULL_REFRESH,
-    targetNodeId: "root",
-  });
-
-  // Show detail route
-  router.registerRoute("CLICK", {
-    actionType: ActionType.SHOW_DETAIL,
-    targetNodeId: "${targetNodeId}",
-    promptTemplate:
-      "Update the UI to show details for the selected item. Current node: ${nodeId}, Target node: ${targetNodeId}",
-    contextKeys: ["selected"],
-  });
-
-  // Navigate route
-  router.registerRoute("CLICK", {
-    actionType: ActionType.NAVIGATE,
-    targetNodeId: "root",
-    promptTemplate:
-      "Navigate to a new view based on the user clicking ${nodeId}. Current goal: ${goal}",
-  });
-
-  // Dropdown route
-  router.registerRoute("CLICK", {
-    actionType: ActionType.ADD_DROPDOWN,
-    targetNodeId: "${targetNodeId}",
-    promptTemplate:
-      "Add a dropdown menu to node ${targetNodeId} with options relevant to the clicked element ${nodeId}",
-  });
-
-  // Toggle state route
-  router.registerRoute("CLICK", {
-    actionType: ActionType.TOGGLE_STATE,
-    targetNodeId: "${nodeId}",
-    promptTemplate:
-      "Toggle the state of node ${nodeId} (e.g., expanded/collapsed, selected/unselected)",
-  });
-
-  // Form update route
-  router.registerRoute("CHANGE", {
-    actionType: ActionType.UPDATE_FORM,
-    targetNodeId: "${targetNodeId}",
-    promptTemplate:
-      "Update the form based on the user changing the value of ${nodeId}",
-  });
-
-  return router;
-}
+// export function createDefaultRouter(): ActionRouter {
+// ... (all its content)
+// }

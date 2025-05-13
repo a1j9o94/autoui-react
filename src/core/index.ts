@@ -2,7 +2,7 @@
 export { callPlannerLLM, mockPlanner, processEvent } from "./planner";
 
 // Export action router functionality
-export { ActionRouter, ActionType, createDefaultRouter } from "./action-router";
+export { ActionRouter, ActionType } from "./action-router";
 
 // Export system events
 export {

@@ -1,3 +1,4 @@
+/// <reference types="vitest/globals" />
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PlannerInput, UIEvent, UISpecNode } from "../schema/ui";
 // Restore static imports
@@ -11,7 +12,7 @@ vi.mock("./system-events", () => ({
   systemEvents: {
     emit: vi.fn().mockResolvedValue(undefined),
   },
-  createSystemEvent: (type: string, payload: any) => ({ type, payload }),
+  createSystemEvent: (type: string, payload: unknown) => ({ type, payload }),
   SystemEventType: {
     PLAN_START: "PLAN_START",
     PLAN_PROMPT_CREATED: "PLAN_PROMPT_CREATED",
@@ -23,7 +24,10 @@ vi.mock("./system-events", () => ({
 
 describe("Planner", () => {
   // Spy on console.error to suppress and check error logging
-  let consoleErrorSpy: any;
+  let consoleErrorSpy: vi.SpyInstance<
+    [message?: unknown, ...optionalParams: unknown[]],
+    void
+  >;
 
   beforeEach(() => {
     consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -193,6 +197,43 @@ describe("Planner", () => {
           expect(listViewNode?.bindings?.data).toBe("tasks.data");
         } catch (error) {
           console.error("LLM call failed in list binding test:", error);
+          throw error;
+        }
+      }, 30000); // Increase timeout if needed
+
+      it("should generate interactive elements like buttons", async () => {
+        const input: PlannerInput = {
+          schema: { userAction: { type: "string", description: "Action to perform" } },
+          goal: "Create a button labeled 'Submit Action' that allows a user to submit an action.",
+          history: null,
+          userContext: null,
+        };
+        const prompt = buildPrompt(input);
+        const mockRouteResolution: RouteResolution = {
+          prompt,
+          actionType: ActionType.FULL_REFRESH,
+          targetNodeId: "root",
+          plannerInput: input,
+        };
+
+        try {
+          const result = await callPlannerLLM(
+            input,
+            process.env.VITE_OPENAI_API_KEY || "", // Fallback to empty string for environments without a key
+            mockRouteResolution
+          );
+          console.log("Button call result\n", result);
+
+          const buttonNode = findNodeByTypeRecursively(result, "Button");
+
+          expect(buttonNode).toBeDefined(); // Check if a Button was generated
+          expect(buttonNode?.props?.label).toBeDefined(); // Check if the button has a label
+          expect(buttonNode?.events).toBeDefined(); // Check if the button has event handlers defined
+          expect(buttonNode?.events?.CLICK).toBeDefined(); // Check for a CLICK event handler
+          // Optionally, check the structure of the CLICK event if it's standardized
+          // For example, expect(buttonNode.events.CLICK.action).toBeDefined();
+        } catch (error) {
+          console.error("LLM call failed in interactive element test:", error);
           throw error;
         }
       }, 30000); // Increase timeout if needed

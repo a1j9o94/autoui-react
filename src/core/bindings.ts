@@ -1,4 +1,4 @@
-import { UISpecNode } from "../schema/ui";
+import { UISpecNode, DataItem } from "../schema/ui";
 import {
   createSystemEvent,
   systemEvents,
@@ -314,6 +314,34 @@ export async function resolveBindings(
   // Determine the effective context for resolving this node's bindings
   const effectiveContext = itemData ? { ...context, item: itemData } : context;
 
+  // Helper function to recursively make all child IDs within an instance unique
+  // Moved here to satisfy linter and define it once per resolveBindings call for a list parent
+  function makeChildIdsUniqueInInstance(parentNode: UISpecNode, baseInstanceId: string, originalTemplateRootId: string) {
+    if (parentNode.children) {
+      parentNode.children = parentNode.children.map(child => {
+        // Attempt to get the original ID part, removing any previously prefixed instance ID
+        let originalChildId = child.id;
+        // This check is a bit heuristic; assumes original IDs don't naturally contain the template root ID with a dash.
+        // A more robust way might involve storing original IDs separately if this becomes problematic.
+        if (child.id.startsWith(originalTemplateRootId + '-')) {
+            const parts = child.id.split('-');
+            if (parts.length > 1) {
+                 // Takes the last part assuming it's the original specific ID part if multiple hyphens exist from prior processing
+                originalChildId = parts[parts.length -1];
+            }
+        }
+        
+        const newChildId = `${baseInstanceId}-${originalChildId}`;
+        const newChild = {
+            ...JSON.parse(JSON.stringify(child)), // Deep clone child
+            id: newChildId
+        };
+        makeChildIdsUniqueInInstance(newChild, baseInstanceId, originalTemplateRootId); // Recurse with the same baseInstanceId
+        return newChild;
+      });
+    }
+  }
+
   // --- Cache Logic (using effective context) ---
   const currentTime = Date.now();
   const cacheKey = createCacheKey(node.id, effectiveContext);
@@ -344,13 +372,34 @@ export async function resolveBindings(
     children: null, // Initialize children to null
   };
 
-  const resolvedBindings: Record<string, unknown> = {};
+  let mergedProps: Record<string, unknown> | null = node.props
+    ? { ...JSON.parse(JSON.stringify(node.props)) }
+    : null;
+
+  const PROP_KEYS_TO_RESOLVE = new Set([
+    "text",
+    "label",
+    "title",
+    "placeholder",
+    "value",
+  ]);
+
+  if (node.props) {
+    for (const [key, value] of Object.entries(node.props)) {
+      if (!PROP_KEYS_TO_RESOLVE.has(key)) continue; // leave untouched
+      const resolvedValue = processBinding(value, context, itemData);
+      if (resolvedValue !== undefined && resolvedValue !== value) {
+        if (!mergedProps) mergedProps = {};
+        mergedProps[key] = resolvedValue;
+      }
+    }
+  }
+
+  result.props = mergedProps;
+
   if (node.bindings) {
     for (const [key, bindingValue] of Object.entries(node.bindings)) {
       const resolvedValue = processBinding(bindingValue, context, itemData);
-
-      resolvedBindings[key] = resolvedValue;
-
       if (resolvedValue !== undefined) {
         if (!result.props) result.props = {};
         result.props[key] = resolvedValue;
@@ -358,20 +407,28 @@ export async function resolveBindings(
     }
   }
 
-  result.bindings = null;
-
+  // Process event payloads if events exist
   if (node.events) {
-    result.events = processBinding(
-      node.events,
-      context,
-      itemData
-    ) as UISpecNode["events"];
+    const processedEvents: UISpecNode["events"] = {};
+    for (const eventType in node.events) {
+      const eventConfig = node.events[eventType];
+      processedEvents[eventType] = {
+        ...eventConfig,
+        payload: eventConfig.payload
+          ? (processBinding(
+              eventConfig.payload,
+              context,
+              itemData
+            ) as Record<string, unknown> | null)
+          : null,
+      };
+    }
+    result.events = processedEvents;
   } else {
     result.events = null;
   }
 
-  const dataBindingValue =
-    resolvedBindings["data"] ?? resolvedBindings["items"];
+  const dataBindingValue = result.props?.data ?? result.props?.items;
 
   if (
     (node.node_type === "ListView" || node.node_type === "Table") &&
@@ -403,6 +460,14 @@ export async function resolveBindings(
             JSON.stringify(templateChild)
           );
           childNodeInstance.id = instanceId;
+          // Crucially, ensure the template's bindings are carried over to the instance
+          // before recursively calling resolveBindings for this item.
+          // The initial JSON.parse(JSON.stringify(templateChild)) should already carry this over.
+          // No explicit assignment like childNodeInstance.bindings = templateChild.bindings is needed if templateChild is properly cloned.
+
+          // Recursively make all child IDs within this instance unique
+          // Pass the original templateChild.id to help reconstruct original part of IDs if nested
+          makeChildIdsUniqueInInstance(childNodeInstance, instanceId, templateChild.id);
 
           const resolvedChild = await resolveBindings(
             childNodeInstance,
@@ -471,63 +536,157 @@ export async function resolveBindings(
 /**
  * Execute an action based on event configuration
  *
- * @param action - The action type (e.g., "VIEW_DETAIL")
- * @param targetId - The target node ID
- * @param payload - Optional payload for the action
+ * @param action - The action type (e.g., "VIEW_DETAIL", "UPDATE_DATA")
+ * @param target - The target data path (e.g., "tasks.data", "user.name") or node ID (for specific actions)
+ * @param payload - Optional payload for the action (e.g., { value: "new" }, { item: {...} }, { id: "..." })
  * @param context - The data context
- * @param layoutTree - The current UI layout tree
+ * @param layoutTree - The current UI layout tree (optional, usage depends on action)
  * @returns Updated data context
  */
 export function executeAction(
   action: string,
-  targetId?: string,
+  target?: string, // Renamed from targetId
   payload?: Record<string, unknown>,
   context: DataContext = {},
-  layoutTree?: UISpecNode
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  layoutTree?: UISpecNode // Added layoutTree back as it might be useful later
 ): DataContext {
   // Clone the context to avoid mutations
   let newContext = { ...context };
 
   switch (action) {
     case "VIEW_DETAIL": {
-      // Set the selected item in the context
+      // Sets the selected item in the context, typically using 'selected' key
       if (payload?.item) {
         newContext = setValueByPath(newContext, "selected", payload.item);
+      } else {
+         console.warn(`[executeAction] VIEW_DETAIL requires payload with item property.`);
       }
-
-      // Update visibility of the target node if provided
-      if (targetId && layoutTree) {
-        // For now, we don't modify the layout tree directly
-        // This would be handled by the reducer in a real implementation
-      }
+      // target might represent the node ID to make visible (handled by reducer/state engine)
       break;
     }
 
-    case "HIDE_DETAIL": {
-      // Clear the selected item
-      newContext = setValueByPath(newContext, "selected", null);
-
-      // Update visibility of the target node if provided
-      if (targetId && layoutTree) {
-        // For now, we don't modify the layout tree directly
-        // This would be handled by the reducer in a real implementation
+    case "SHOW_DIALOG": {
+      if (payload?.taskId && target) {
+        // Assuming context.tasks.data is the path to the array of tasks
+        const tasksData = getValueByPath(context, "tasks.data");
+        if (Array.isArray(tasksData)) {
+          const foundTask = (tasksData as DataItem[]).find(t => t.id === payload.taskId);
+          if (foundTask) {
+            newContext = setValueByPath(newContext, "selectedTask", foundTask);
+            console.log(`[executeAction] SHOW_DIALOG: Set selectedTask to:`, foundTask);
+          } else {
+            console.warn(`[executeAction] SHOW_DIALOG: Task with id "${payload.taskId}" not found in tasks.data.`);
+            newContext = setValueByPath(newContext, "selectedTask", null); // Clear if not found
+          }
+        } else {
+          console.warn(`[executeAction] SHOW_DIALOG: context.tasks.data is not an array or not found.`);
+          newContext = setValueByPath(newContext, "selectedTask", null);
+        }
+      } else {
+        console.warn(`[executeAction] SHOW_DIALOG: payload.taskId or target was missing.`);
+        // If no taskId, we might still want to make a generic dialog visible without specific data
+        // but for now, we primarily link it to selecting an item.
       }
+      newContext = setValueByPath(newContext, "isTaskDetailDialogVisible", true);
+      console.log(`[executeAction] SHOW_DIALOG: set isTaskDetailDialogVisible to true. Dialog target: ${target}, Payload:`, payload);
       break;
     }
 
-    case "SET_VALUE": {
-      // Set a value in the context
-      if (payload?.path && "value" in payload) {
-        const path = String(payload.path);
-        newContext = setValueByPath(newContext, path, payload.value);
-      }
+    case "HIDE_DIALOG": {
+      // This action makes a dialog invisible, often by unsetting a flag or selected item.
+      newContext = setValueByPath(newContext, "selectedTask", null);
+      // Assuming "isTaskDetailDialogVisible" controls visibility.
+      newContext = setValueByPath(newContext, "isTaskDetailDialogVisible", false);
+      console.log(`[executeAction] HIDE_DIALOG: set isTaskDetailDialogVisible to false.`);
       break;
     }
 
-    // Add more actions as needed
+    case "UPDATE_DATA": {
+        // Updates a specific data path with a value from the payload
+        if (target && payload && 'value' in payload) {
+          // target is used as the data path here
+          newContext = setValueByPath(newContext, target, payload.value);
+        } else {
+           console.warn(`[executeAction] UPDATE_DATA requires targetPath (data path) and payload with 'value' property.`);
+        }
+        break;
+    }
+
+    case "ADD_ITEM": {
+      // Adds an item to an array specified by the target path
+      if (!target) {
+         console.warn(`[executeAction] ADD_ITEM requires target path.`);
+         break;
+      }
+       if (!payload?.item) {
+         console.warn(`[executeAction] ADD_ITEM requires payload with item property.`);
+         break;
+       }
+
+      const list = getValueByPath(newContext, target);
+      if (!Array.isArray(list)) {
+        console.warn(`[executeAction] ADD_ITEM failed: target path "${target}" does not resolve to an array.`);
+        break;
+      }
+
+      const newItem = payload.item;
+      const position = payload.position as string | undefined;
+      let newList;
+      if (position === 'start') {
+          newList = [newItem, ...list];
+      } else {
+           newList = [...list, newItem];
+      }
+
+      newContext = setValueByPath(newContext, target, newList);
+      break;
+    }
+
+     case "DELETE_ITEM": {
+       // Deletes an item (identified by id) from an array specified by the target path
+      if (!target) {
+         console.warn(`[executeAction] DELETE_ITEM requires target path.`);
+         break;
+      }
+      const itemId = payload?.id as string | number | undefined;
+       if (itemId === undefined || itemId === null) {
+         console.warn(`[executeAction] DELETE_ITEM requires payload with id property.`);
+         break;
+       }
+
+      const list = getValueByPath(newContext, target);
+        if (!Array.isArray(list)) {
+          console.warn(`[executeAction] DELETE_ITEM failed: target path "${target}" does not resolve to an array.`);
+          break;
+        }
+
+        // Filter out the item with the matching id
+        const newList = list.filter((item: { id?: string | number | undefined }) => item?.id !== itemId);
+
+        // Only update if the list actually changed
+        if (newList.length !== list.length) {
+            newContext = setValueByPath(newContext, target, newList);
+        } else {
+             console.warn(`[executeAction] DELETE_ITEM: Item with id "${itemId}" not found in list at path "${target}".`);
+        }
+        break;
+     }
+
+    // --- Deprecated SET_VALUE action, prefer UPDATE_DATA ---
+    // case "SET_VALUE": {
+    //   // Set a value in the context based on payload.path
+    //   if (payload?.path && "value" in payload) {
+    //     const path = String(payload.path);
+    //     newContext = setValueByPath(newContext, path, payload.value);
+    //   } else {
+    //      console.warn(`[executeAction] SET_VALUE requires payload with path and value properties.`);
+    //   }
+    //   break;
+    // }
 
     default:
-      console.warn(`Unknown action: ${action}`);
+      console.warn(`[executeAction] Unhandled action type: ${action}`);
   }
 
   return newContext;
