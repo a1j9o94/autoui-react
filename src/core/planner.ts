@@ -7,7 +7,7 @@ import {
   SystemEventType,
 } from "./system-events";
 import { env } from "../env";
-import { ActionRouter, RouteResolution } from "./action-router";
+import { ActionRouter, RouteResolution, buildPrompt } from "./action-router";
 import { DataContext } from "./bindings";
 
 // Helper function to create the OpenAI client REQUIRES an API key
@@ -226,10 +226,16 @@ export async function callPlannerLLM(
 
   const startTime = Date.now();
 
-  // Use prompt from route resolution (must be provided by action-router)
-  const prompt = routeResolution?.prompt;
-  if (!prompt) {
-    throw new Error("ActionRouter did not provide a prompt to callPlannerLLM.");
+  let prompt: string;
+  if (routeResolution?.prompt) {
+    prompt = routeResolution.prompt;
+  } else {
+    // If no prompt from routeResolution (e.g., for full refresh or when enablePartialUpdates is false),
+    // build a default prompt using the main PlannerInput.
+    console.warn(
+      "[callPlannerLLM] No prompt provided by routeResolution or routeResolution is undefined. Building default prompt from input."
+    );
+    prompt = buildPrompt(input); // Fallback to generating a prompt from the input
   }
 
   // Emit prompt created event

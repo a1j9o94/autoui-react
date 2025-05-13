@@ -83,6 +83,11 @@ export function useUIStateEngine({
         const layoutForRouting = currentResolvedLayout || stateRef.current.layout;
         const contextForRouting = updatedDataContext || dataContext;
 
+        // ADD LOGS BEFORE AND AFTER router.resolveRoute
+        console.log("[state.ts handleEvent] About to call router.resolveRoute. enablePartialUpdates:", enablePartialUpdates);
+        console.log("[state.ts handleEvent] layoutForRouting ID (if exists):", layoutForRouting?.id);
+        // console.log("[state.ts handleEvent] contextForRouting:", JSON.stringify(contextForRouting, null, 2)); // Can be large
+
         if (enablePartialUpdates) {
           const route = router.resolveRoute(
             event,
@@ -92,6 +97,9 @@ export function useUIStateEngine({
             goal,
             userContext
           );
+
+          // ADD THIS LOG STRATEGICALLY
+          console.log("[state.ts handleEvent] router.resolveRoute returned:", route);
 
           if (route) {
             console.log("Resolved route:", route);

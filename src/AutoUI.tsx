@@ -186,7 +186,7 @@ export const AutoUI: React.FC<AutoUIProps> = ({
   planningConfig,
   integration = {},
   scope = {},
-  enablePartialUpdates = false,
+  enablePartialUpdates = true,
   openaiApiKey,
 }) => {
   // Initialize schema adapter if provided

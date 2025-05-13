@@ -813,6 +813,9 @@ export const adapterMap: Record<
       key,
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       open: _openProp,
+      // ADD 'visible' to destructuring to prevent it from going into restProps
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      visible: _visibleProp,
       ...restProps
     } = node.props || {}; // Renamed unused styleProp to _styleProp, open to _openProp
 
