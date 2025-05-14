@@ -1,4 +1,5 @@
 import { UISpecNode, DataItem } from "../schema/ui";
+import { ActionType } from "../schema/action-types";
 import {
   createSystemEvent,
   systemEvents,
@@ -311,6 +312,34 @@ export async function resolveBindings(
   context: DataContext,
   itemData?: Record<string, unknown> // Added item context for list items
 ): Promise<UISpecNode> {
+  console.log(
+    `[resolveBindings ENTRY] Node ID: ${node.id}, Type: ${
+      node.node_type
+    }, Has itemData: ${!!itemData}, Context keys: ${Object.keys(
+      context || {}
+    ).join(", ")}`
+  );
+
+  // Add this for task-detail before the bindings loop
+  if (node.id === "task-detail") {
+    console.log(
+      `[resolveBindings PRE-LOOP Debug] task-detail node.props:`,
+      JSON.stringify(node.props)
+    );
+    console.log(
+      `[resolveBindings PRE-LOOP Debug] task-detail node.bindings:`,
+      JSON.stringify(node.bindings)
+    );
+    console.log(
+      `[resolveBindings PRE-LOOP Debug] task-detail initial result.props.visible (from node.props):`,
+      (node.props ? node.props.visible : 'node.props is null')
+    );
+    console.log(
+      `[resolveBindings PRE-LOOP Debug] task-detail context.isTaskDetailDialogVisible:`,
+      context.isTaskDetailDialogVisible
+    );
+  }
+
   // Determine the effective context for resolving this node's bindings
   const effectiveContext = itemData ? { ...context, item: itemData } : context;
 
@@ -361,6 +390,13 @@ export async function resolveBindings(
     cachedTimestamp &&
     currentTime - cachedTimestamp < CACHE_TTL
   ) {
+    // Add this log for task-detail when returning from cache
+    if (node.id === "task-detail") {
+      console.log(
+        `[resolveBindings CACHE HIT Debug] task-detail returning cachedNode. Cached props.visible:`,
+        (cachedNode.props ? cachedNode.props.visible : 'cachedNode.props is null')
+      );
+    }
     return cachedNode;
   }
 
@@ -426,10 +462,36 @@ export async function resolveBindings(
 
   if (node.bindings) {
     for (const [key, bindingValue] of Object.entries(node.bindings)) {
+      // Add this log for task-detail INSIDE the loop
+      if (node.id === "task-detail") {
+        console.log(
+          `[resolveBindings IN-LOOP Debug] task-detail processing binding - Key: "${key}", Value:`,
+          bindingValue,
+          `Context.isTaskDetailDialogVisible: ${context.isTaskDetailDialogVisible}`
+        );
+      }
+
       const resolvedValue = processBinding(bindingValue, context, itemData);
+
+      // Add this log for task-detail AFTER processBinding for the 'visible' key
+      if (node.id === "task-detail" && key === "visible") {
+        console.log(
+          `[resolveBindings IN-LOOP Debug] task-detail 'visible' binding resolved to:`,
+          resolvedValue
+        );
+      }
+
       if (resolvedValue !== undefined) {
         if (!result.props) result.props = {};
         result.props[key] = resolvedValue;
+
+        // Add this log for task-detail AFTER setting result.props[key] for 'visible'
+        if (node.id === "task-detail" && key === "visible") {
+          console.log(
+            `[resolveBindings IN-LOOP Debug] task-detail result.props.visible is NOW:`,
+            result.props.visible
+          );
+        }
       }
     }
   }
@@ -456,75 +518,140 @@ export async function resolveBindings(
 
   const dataBindingValue = result.props?.data ?? result.props?.items;
 
+  // Add detailed logs before the ListView processing condition
+  if (node.id === "task-list") {
+    // Log only for the specific ListView we are interested in
+    console.log(
+      `[resolveBindings Debug] Checking node ${node.id} (${node.node_type}) for ListView processing eligibility:`
+    );
+    console.log(
+      `[resolveBindings Debug]   Is ListView or Table type: ${
+        node.node_type === "ListView" || node.node_type === "Table"
+      }`
+    );
+    console.log(
+      `[resolveBindings Debug]   Is dataBindingValue an array: ${Array.isArray(
+        dataBindingValue
+      )}`
+    );
+    if (Array.isArray(dataBindingValue)) {
+      console.log(
+        `[resolveBindings Debug]     dataBindingValue length: ${dataBindingValue.length}`
+      );
+    }
+    console.log(
+      `[resolveBindings Debug]   Original node.children (template) exists: ${!!node.children}`
+    );
+    if (node.children) {
+      console.log(
+        `[resolveBindings Debug]     Original node.children.length (template count): ${node.children.length}`
+      );
+    }
+  }
+
   if (
     (node.node_type === "ListView" || node.node_type === "Table") &&
     Array.isArray(dataBindingValue) &&
     node.children &&
     node.children.length > 0
   ) {
+    if (node.id === "task-list") {
+      console.log(
+        `[resolveBindings Debug] ENTERED ListView processing for ${node.id}`
+      );
+    }
+
+    // Check if the children are already instantiated items or a template
+    // A simple heuristic: if the first child's ID does not strictly match the template ID we expect.
+    // This assumes a single template child in the spec from the planner.
     const templateChild = node.children[0];
-    const mappedChildren = await Promise.all(
-      dataBindingValue.map(async (currentItemData, index) => {
-        try {
-          if (typeof currentItemData !== "object" || currentItemData === null) {
-            console.warn(
-              `List item at index ${index} for node ${node.id} is not an object:`,
+    const isAlreadyExpanded =
+      node.children.length > 1 ||
+      (node.children.length === 1 && templateChild.id !== "taskItem-template");
+
+    if (isAlreadyExpanded && node.id === "task-list") {
+      console.log(
+        `[resolveBindings Debug] ListView ${node.id} appears to be already expanded. Re-resolving its existing children.`
+      );
+      // If already expanded, just re-resolve bindings on existing children
+      // This might happen if the parent re-renders and passes the already processed ListView node.
+      result.children = await Promise.all(
+        node.children.map((existingChild) =>
+          resolveBindings(existingChild, context, itemData)
+        ) // itemData is tricky here, should it be from parent or is it irrelevant?
+        // For now, assume itemData is not applicable for re-resolving top-level list items this way.
+      );
+    } else {
+      // Standard expansion logic using templateChild
+      if (node.id === "task-list") {
+        console.log(
+          `[resolveBindings Debug] ListView ${node.id} is using template: ${templateChild.id}`
+        );
+      }
+      const mappedChildren = await Promise.all(
+        dataBindingValue.map(async (currentItemData, index) => {
+          try {
+            if (
+              typeof currentItemData !== "object" ||
+              currentItemData === null
+            ) {
+              console.warn(
+                `List item at index ${index} for node ${node.id} is not an object:`,
+                currentItemData
+              );
+              return null;
+            }
+            const currentItemAsRecord = currentItemData as Record<
+              string,
+              unknown
+            >;
+            const itemId = currentItemAsRecord.id as
+              | string
+              | number
+              | undefined;
+            const instanceId = `${templateChild.id}-${itemId || index}`;
+
+            const childNodeInstance: UISpecNode = JSON.parse(
+              JSON.stringify(templateChild)
+            );
+            childNodeInstance.id = instanceId;
+
+            makeChildIdsUniqueInInstance(
+              childNodeInstance,
+              instanceId,
+              templateChild.id
+            );
+
+            const resolvedChild = await resolveBindings(
+              childNodeInstance,
+              context,
+              currentItemAsRecord
+            );
+
+            if (resolvedChild && !resolvedChild.props) resolvedChild.props = {};
+            if (resolvedChild && resolvedChild.props) {
+              resolvedChild.props.key = itemId || `${node.id}-item-${index}`;
+            }
+            return resolvedChild;
+          } catch (error) {
+            console.error(
+              `[resolveBindings Error] Error processing item at index ${index} for node ${node.id}:`,
+              error,
+              "Item Data:",
               currentItemData
             );
             return null;
           }
-          // console.log(`[resolveBindings Debug] Mapping item ${index} for node ${node.id}:`, currentItemData);
-
-          const currentItemAsRecord = currentItemData as Record<
-            string,
-            unknown
-          >;
-          const itemId = currentItemAsRecord.id as string | number | undefined;
-          const instanceId = `${templateChild.id}-${itemId || index}`;
-
-          const childNodeInstance: UISpecNode = JSON.parse(
-            JSON.stringify(templateChild)
-          );
-          childNodeInstance.id = instanceId;
-          // Crucially, ensure the template's bindings are carried over to the instance
-          // before recursively calling resolveBindings for this item.
-          // The initial JSON.parse(JSON.stringify(templateChild)) should already carry this over.
-          // No explicit assignment like childNodeInstance.bindings = templateChild.bindings is needed if templateChild is properly cloned.
-
-          // Recursively make all child IDs within this instance unique
-          // Pass the original templateChild.id to help reconstruct original part of IDs if nested
-          makeChildIdsUniqueInInstance(
-            childNodeInstance,
-            instanceId,
-            templateChild.id
-          );
-
-          const resolvedChild = await resolveBindings(
-            childNodeInstance,
-            context,
-            currentItemAsRecord
-          );
-          // console.log(`[resolveBindings Debug] Resolved child for item ${index} (node ${node.id}):`, JSON.parse(JSON.stringify(resolvedChild)));
-
-          if (!resolvedChild.props) resolvedChild.props = {};
-          resolvedChild.props.key = itemId || `${node.id}-item-${index}`;
-
-          return resolvedChild;
-        } catch (error) {
-          console.error(
-            `[resolveBindings Error] Error processing item at index ${index} for node ${node.id}:`,
-            error,
-            "Item Data:",
-            currentItemData
-          );
-          return null;
-        }
-      })
-    );
-    result.children = mappedChildren.filter(
-      (child) => child !== null
-    ) as UISpecNode[];
-    // console.log(`[resolveBindings Debug] Final mapped children for node ${node.id}:`, JSON.parse(JSON.stringify(result.children)));
+        })
+      );
+      console.log(
+        `[resolveBindings Debug] ListView ${node.id} - mappedChildren:`,
+        JSON.stringify(mappedChildren, null, 2)
+      );
+      result.children = mappedChildren.filter(
+        (child) => child !== null
+      ) as UISpecNode[];
+    }
   } else if (node.children && node.children.length > 0) {
     result.children = await Promise.all(
       node.children.map((child) => resolveBindings(child, context, itemData))
@@ -539,6 +666,18 @@ export async function resolveBindings(
         originalLayout: node,
         resolvedLayout: result,
       })
+    );
+  }
+
+  // Add this for task-detail just before returning
+  if (node.id === "task-detail") {
+    console.log(
+      `[resolveBindings RETURN Debug] task-detail final result.props:`,
+      JSON.stringify(result.props)
+    );
+    console.log(
+      `[resolveBindings RETURN Debug] task-detail final result.bindings:`,
+      JSON.stringify(result.bindings)
     );
   }
 
@@ -570,108 +709,187 @@ export async function resolveBindings(
  * @param target - The target data path (e.g., "tasks.data", "user.name") or node ID (for specific actions)
  * @param payload - Optional payload for the action (e.g., { value: "new" }, { item: {...} }, { id: "..." })
  * @param context - The data context
- * @param layoutTree - The current UI layout tree (optional, usage depends on action)
  * @returns Updated data context
  */
 export function executeAction(
   action: string,
-  target?: string, // Renamed from targetId
+  target?: string,
   payload?: Record<string, unknown>,
-  context: DataContext = {},
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  layoutTree?: UISpecNode // Added layoutTree back as it might be useful later
+  context: DataContext = {}
 ): DataContext {
-  // Clone the context to avoid mutations
+  console.log(
+    `[executeAction ENTRY] Received action string: "${action}" (type: ${typeof action}), Target: ${target}`
+  );
+  console.log(
+    `[executeAction ENTRY] Comparing with ActionType.SHOW_DETAIL (enum): "${ActionType.SHOW_DETAIL}"`
+  );
+  console.log(
+    `[executeAction ENTRY] Comparing with ActionType.HIDE_DIALOG (enum): "${ActionType.HIDE_DIALOG}"`
+  );
+
   let newContext = { ...context };
 
-  switch (action) {
-    case "VIEW_DETAIL": {
-      // Sets the selected item in the context, typically using 'selected' key
+  switch (action as ActionType | string) {
+    // Remove the string-literal "VIEW_DETAIL" case if it's not actively used
+    // or if its functionality is covered by ActionType.SHOW_DETAIL
+    /*
+    case "VIEW_DETAIL": { 
       if (payload?.item) {
         newContext = setValueByPath(newContext, "selected", payload.item);
       } else {
         console.warn(
-          `[executeAction] VIEW_DETAIL requires payload with item property.`
+          `[executeAction] VIEW_DETAIL action requires payload with item property.`
         );
       }
-      // target might represent the node ID to make visible (handled by reducer/state engine)
       break;
     }
+    */
 
-    case "SHOW_DIALOG": {
-      if (payload?.taskId && target) {
-        // Assuming context.tasks.data is the path to the array of tasks
-        const tasksData = getValueByPath(context, "tasks.data");
+    case ActionType.SHOW_DETAIL: {
+      const taskId = payload?.taskId as string | undefined;
+      const dialogNodeId = target;
+
+      if (taskId && dialogNodeId) {
+        const tasksData = getValueByPath(context, "tasks.data"); // Use original context for reading tasks
         if (Array.isArray(tasksData)) {
           const foundTask = (tasksData as DataItem[]).find(
-            (t) => t.id === payload.taskId
+            (t) => t.id === taskId
           );
           if (foundTask) {
             newContext = setValueByPath(newContext, "selectedTask", foundTask);
             console.log(
-              `[executeAction] SHOW_DIALOG: Set selectedTask to:`,
+              `[executeAction] ${ActionType.SHOW_DETAIL}: Set selectedTask to:`,
               foundTask
             );
           } else {
             console.warn(
-              `[executeAction] SHOW_DIALOG: Task with id "${payload.taskId}" not found in tasks.data.`
+              `[executeAction] ${ActionType.SHOW_DETAIL}: Task with id "${taskId}" not found in tasks.data.`
             );
-            newContext = setValueByPath(newContext, "selectedTask", null); // Clear if not found
+            newContext = setValueByPath(newContext, "selectedTask", null);
           }
         } else {
           console.warn(
-            `[executeAction] SHOW_DIALOG: context.tasks.data is not an array or not found.`
+            `[executeAction] ${ActionType.SHOW_DETAIL}: context.tasks.data is not an array or not found.`
           );
           newContext = setValueByPath(newContext, "selectedTask", null);
         }
       } else {
         console.warn(
-          `[executeAction] SHOW_DIALOG: payload.taskId or target was missing.`
+          `[executeAction] ${ActionType.SHOW_DETAIL}: payload.taskId or target (dialogNodeId) was missing. Dialog will be shown without a selected task.`
         );
-        // If no taskId, we might still want to make a generic dialog visible without specific data
-        // but for now, we primarily link it to selecting an item.
+        newContext = setValueByPath(newContext, "selectedTask", null); // Ensure selectedTask is null if no taskId
       }
+
+      // Always attempt to set the dialog visibility flag to true for SHOW_DETAIL action
       newContext = setValueByPath(
-        newContext,
+        newContext, // Use the potentially modified newContext (with selectedTask set or cleared)
         "isTaskDetailDialogVisible",
         true
       );
       console.log(
-        `[executeAction] SHOW_DIALOG: set isTaskDetailDialogVisible to true. Dialog target: ${target}, Payload:`,
+        `[executeAction] ${ActionType.SHOW_DETAIL}: set isTaskDetailDialogVisible to true. Dialog target: ${dialogNodeId}, Payload:`,
         payload
       );
       break;
     }
 
-    case "HIDE_DIALOG": {
-      // This action makes a dialog invisible, often by unsetting a flag or selected item.
+    case ActionType.HIDE_DIALOG: {
       newContext = setValueByPath(newContext, "selectedTask", null);
-      // Assuming "isTaskDetailDialogVisible" controls visibility.
       newContext = setValueByPath(
         newContext,
         "isTaskDetailDialogVisible",
         false
       );
       console.log(
-        `[executeAction] HIDE_DIALOG: set isTaskDetailDialogVisible to false.`
+        `[executeAction] ${ActionType.HIDE_DIALOG}: set isTaskDetailDialogVisible to false.`
       );
       break;
     }
 
-    case "UPDATE_DATA": {
-      // Updates a specific data path with a value from the payload
-      if (target && payload && "value" in payload) {
-        // target is used as the data path here
-        newContext = setValueByPath(newContext, target, payload.value);
+    case ActionType.HIDE_DETAIL: {
+      newContext = setValueByPath(newContext, "selectedItemForDetail", null); // Example general detail item
+      newContext = setValueByPath(newContext, "isDetailViewOpen", false); // Example general detail flag
+      console.log(
+        `[executeAction] ${ActionType.HIDE_DETAIL}: Detail view hidden.`
+      );
+      break;
+    }
+
+    case ActionType.OPEN_DIALOG: {
+      const dialogId = target || (payload?.dialogId as string | undefined);
+      // For now, assume it refers to the task detail dialog for simplicity, adjust if more dialogs exist
+      if (dialogId === "taskDetailDialogNodeId" || !dialogId) {
+        // Default to task detail if no specific id or it matches
+        newContext = setValueByPath(
+          newContext,
+          "isTaskDetailDialogVisible",
+          true
+        );
+        // If a specific item should be loaded, SHOW_DETAIL with taskId is more appropriate.
+        // OPEN_DIALOG might just make a generic, perhaps empty, dialog visible.
+        console.log(
+          `[executeAction] ${ActionType.OPEN_DIALOG}: Dialog ${
+            dialogId || "taskDetailDialogNodeId"
+          } opened (isTaskDetailDialogVisible: true).`
+        );
       } else {
+        // Logic for other dialogs if their visibility is controlled by different flags
         console.warn(
-          `[executeAction] UPDATE_DATA requires targetPath (data path) and payload with 'value' property.`
+          `[executeAction] ${ActionType.OPEN_DIALOG}: Unhandled dialogId: ${dialogId}.`
         );
       }
       break;
     }
 
-    case "ADD_ITEM": {
+    case ActionType.CLOSE_DIALOG: {
+      const dialogId = target || (payload?.dialogId as string | undefined);
+      if (dialogId === "taskDetailDialogNodeId" || !dialogId) {
+        newContext = setValueByPath(
+          newContext,
+          "isTaskDetailDialogVisible",
+          false
+        );
+        newContext = setValueByPath(newContext, "selectedTask", null); // Clear task for this specific dialog
+        console.log(
+          `[executeAction] ${ActionType.CLOSE_DIALOG}: Dialog ${
+            dialogId || "taskDetailDialogNodeId"
+          } closed and selectedTask cleared.`
+        );
+      } else {
+        // Logic for other dialogs
+        console.warn(
+          `[executeAction] ${ActionType.CLOSE_DIALOG}: Unhandled dialogId: ${dialogId}.`
+        );
+      }
+      break;
+    }
+
+    case ActionType.UPDATE_DATA: {
+      console.log(
+        "[executeAction UPDATE_DATA] Context BEFORE setValueByPath:",
+        JSON.stringify(context, null, 2)
+      );
+      console.log(
+        `[executeAction UPDATE_DATA] Target path: ${target}, Payload value: ${payload?.value}`
+      );
+      let updatedContext = context; // Start with the passed context
+      if (target && payload && "value" in payload) {
+        updatedContext = setValueByPath(context, target, payload.value); // Use original context as base for setValueByPath
+      } else {
+        console.warn(
+          `[executeAction] ${ActionType.UPDATE_DATA} requires targetPath (data path) and payload with 'value' property.`
+        );
+        // newContext will remain a clone of the original context if conditions aren't met
+      }
+      console.log(
+        "[executeAction UPDATE_DATA] Context AFTER setValueByPath (assigned to newContext):",
+        JSON.stringify(updatedContext, null, 2)
+      );
+      newContext = updatedContext; // Assign the result to newContext which is returned by the function
+      break;
+    }
+
+    case ActionType.ADD_ITEM: {
       // Adds an item to an array specified by the target path
       if (!target) {
         console.warn(`[executeAction] ADD_ITEM requires target path.`);
@@ -705,7 +923,7 @@ export function executeAction(
       break;
     }
 
-    case "DELETE_ITEM": {
+    case ActionType.DELETE_ITEM: {
       // Deletes an item (identified by id) from an array specified by the target path
       if (!target) {
         console.warn(`[executeAction] DELETE_ITEM requires target path.`);
@@ -743,7 +961,7 @@ export function executeAction(
       break;
     }
 
-    case "SAVE_TASK_CHANGES": {
+    case ActionType.SAVE_TASK_CHANGES: {
       if (!target) {
         // target here would be the selectedTask.id passed from payload or event
         console.warn(
@@ -792,18 +1010,6 @@ export function executeAction(
       }
       break;
     }
-
-    // --- Deprecated SET_VALUE action, prefer UPDATE_DATA ---
-    // case "SET_VALUE": {
-    //   // Set a value in the context based on payload.path
-    //   if (payload?.path && "value" in payload) {
-    //     const path = String(payload.path);
-    //     newContext = setValueByPath(newContext, path, payload.value);
-    //   } else {
-    //      console.warn(`[executeAction] SET_VALUE requires payload with path and value properties.`);
-    //   }
-    //   break;
-    // }
 
     default:
       console.warn(`[executeAction] Unhandled action type: ${action}`);

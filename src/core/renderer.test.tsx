@@ -222,13 +222,12 @@ describe("Renderer", () => {
       // Second call with a node having the same ID but different props
       const element2 = await rendererModule.renderNode(nodeV2);
 
-      // With the ID-only cache re-enabled in renderer.tsx, this should now return "Version 1"
-      // because the ID "shared-id-for-cache-test" is the same.
-      expect(element2.props.children).toBe("Version 1");
+      // With the NEW more specific cache key, this should now return "Version 2"
+      // because the props are different, leading to a cache miss and re-render.
+      expect(element2.props.children).toBe("Version 2");
 
-      // And ShadcnAdapter.renderNode should NOT have been called for nodeV2 because it was cached
-      expect(ShadcnAdapter.renderNode).not.toHaveBeenCalled();
-      // expect(ShadcnAdapter.renderNode).toHaveBeenCalledTimes(1); // This would be if it WAS called for V2
+      // And ShadcnAdapter.renderNode SHOULD have been called for nodeV2 because it was a cache miss.
+      expect(ShadcnAdapter.renderNode).toHaveBeenCalledTimes(1);
     });
   });
 

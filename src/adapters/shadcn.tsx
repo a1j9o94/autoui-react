@@ -127,7 +127,11 @@ const Detail: React.FC<{
   visible?: boolean | undefined;
   onBack?: (() => void) | undefined;
 }> = ({ data, fields = [], title, visible = true, onBack }) => {
-  if (!visible) return null;
+  if (!visible) {
+    console.log(`[Detail Component Internal] Detail component for node id: ${data?.id || title || 'Unknown Detail'} is NOT RENDERING because visible is ${visible}.`);
+    return null;
+  }
+  console.log(`[Detail Component Internal] Detail component for node id: ${data?.id || title || 'Unknown Detail'} IS RENDERING because visible is ${visible}.`);
 
   return (
     <div className="w-full border border-gray-300 dark:border-gray-700 rounded-lg p-6 space-y-4 bg-white dark:bg-gray-900 shadow-sm">
@@ -146,43 +150,48 @@ const Detail: React.FC<{
 
       <div className="space-y-4">
         {fields.map((field) => {
-          if (field.type === "heading") {
-            return (
-              <h3
-                key={field.key}
-                className="text-xl font-semibold text-gray-800 dark:text-white"
-              >
-                {data?.[field.key] ?? ""}
-              </h3>
-            );
-          }
+          try {
+            if (field.type === "heading") {
+              return (
+                <h3
+                  key={field.key}
+                  className="text-xl font-semibold text-gray-800 dark:text-white"
+                >
+                  {data?.[field.key] ?? ""}
+                </h3>
+              );
+            }
 
-          if (field.type === "content") {
+            if (field.type === "content") {
+              return (
+                <div
+                  key={field.key}
+                  className="text-sm text-gray-700 dark:text-gray-300"
+                >
+                  {data?.[field.key] ?? ""}
+                </div>
+              );
+            }
+
             return (
               <div
                 key={field.key}
-                className="text-sm text-gray-700 dark:text-gray-300"
+                className="flex flex-col border-b border-gray-100 dark:border-gray-800 py-2"
               >
-                {data?.[field.key] ?? ""}
+                {field.label && (
+                  <span className="text-xs text-gray-600 dark:text-gray-400 font-medium">
+                    {field.label}
+                  </span>
+                )}
+                <span className="text-sm text-gray-800 dark:text-gray-200">
+                  {data?.[field.key] ?? ""}
+                </span>
               </div>
             );
+          } catch (e) {
+            console.error(`[Detail Component Internal] Error rendering field: ${field?.key}`, e, "Field data:", field, "Full data object:", data);
+            return <div key={field?.key || 'error-field'}>Error rendering field: {field?.key}</div>;
           }
-
-          return (
-            <div
-              key={field.key}
-              className="flex flex-col border-b border-gray-100 dark:border-gray-800 py-2"
-            >
-              {field.label && (
-                <span className="text-xs text-gray-600 dark:text-gray-400 font-medium">
-                  {field.label}
-                </span>
-              )}
-              <span className="text-sm text-gray-800 dark:text-gray-200">
-                {data?.[field.key] ?? ""}
-              </span>
-            </div>
-          );
         })}
       </div>
     </div>
@@ -406,20 +415,29 @@ export const adapterMap: Record<
   },
 
   Detail: (node, processEvent) => {
-    const data = getSafeBinding(
-      node.bindings,
+    const data = getSafeProp(
+      node.props,
       "data",
       isRecordWithReactNodeValues,
       {}
     ) as Record<string, React.ReactNode>;
-    const fields = getSafeBinding(
-      node.bindings,
+    const fields = getSafeProp(
+      node.props,
       "fields",
       isArrayOf(isDetailFieldObject),
       []
     );
     const title = getSafeProp(node.props, "title", isString, "");
     const visible = getSafeProp(node.props, "visible", isBoolean, true);
+
+    // Add a specific log here for the Detail adapter
+    console.log(
+        `[Adapter Debug] Rendering Detail: id=${node.id}, props=`,
+        JSON.stringify(node.props), 
+        `effective visible=${visible}`,
+        `typeof fields=${typeof fields}`,
+        `Array.isArray(fields)=${Array.isArray(fields)}`
+    );
 
     return (
       <Detail

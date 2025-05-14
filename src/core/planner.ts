@@ -1,6 +1,6 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateObject } from "ai";
-import { PlannerInput, UISpecNode, openAIUISpec, UIEvent } from "../schema/ui";
+import { PlannerInput, UISpecNode, UIEvent } from "../schema/ui";
 import {
   createSystemEvent,
   systemEvents,
@@ -9,6 +9,8 @@ import {
 import { env } from "../env";
 import { ActionRouter, RouteResolution, buildPrompt } from "./action-router";
 import { DataContext } from "./bindings";
+import { openAIUISpec } from "../schema/openai-ui-spec";
+import { ActionType } from "../schema/action-types";
 
 // Helper function to create the OpenAI client REQUIRES an API key
 const getOpenAIClient = (apiKey: string) => {
@@ -33,26 +35,6 @@ export function mockPlanner(
   if (customPrompt) {
     console.log("mockPlanner received customPrompt:", customPrompt);
   }
-  const taskSchema = input.schema.tasks as
-    | { sampleData?: unknown[] }
-    | undefined;
-  const taskData = taskSchema?.sampleData || [
-    {
-      id: "1",
-      title: "Example Task 1",
-      description: "This is a sample task",
-      status: "pending",
-      priority: "medium",
-    },
-    {
-      id: "2",
-      title: "Example Task 2",
-      description: "Another sample task",
-      status: "completed",
-      priority: "high",
-    },
-  ];
-
   const mockNode: UISpecNode = {
     id: targetNodeId || "root",
     node_type: "Container",
@@ -121,7 +103,7 @@ export function mockPlanner(
                     bindings: null,
                     events: {
                       onClick: {
-                        action: "ADD_TASK",
+                        action: ActionType.ADD_ITEM,
                         target: "tasks-container",
                         payload: {},
                       },
@@ -147,14 +129,74 @@ export function mockPlanner(
                 },
                 events: {
                   onSelect: {
-                    action: "SELECT_TASK",
+                    action: ActionType.SHOW_DETAIL,
                     target: "task-detail",
-                    payload: {
-                      source: "task-list",
-                    },
+                    payload: {},
                   },
                 },
-                children: null,
+                children: [
+                  {
+                    id: "taskItem-template",
+                    node_type: "Card",
+                    props: {
+                      className:
+                        "p-3 mb-2 border rounded hover:shadow-md transition-shadow",
+                    },
+                    bindings: null,
+                    events: {
+                      CLICK: {
+                        action: ActionType.SHOW_DETAIL,
+                        target: "task-detail",
+                        payload: { taskId: "{{item.id}}" },
+                      },
+                    },
+                    children: [
+                      {
+                        id: "template-title",
+                        node_type: "Text",
+                        props: { className: "font-semibold text-lg" },
+                        bindings: { text: "{{item.title}}" },
+                        events: null,
+                        children: null,
+                      },
+                      {
+                        id: "template-status",
+                        node_type: "Text",
+                        props: { className: "text-sm text-gray-600" },
+                        bindings: { text: "Status: {{item.status}}" },
+                        events: null,
+                        children: null,
+                      },
+                      {
+                        id: "template-priority",
+                        node_type: "Text",
+                        props: { className: "text-xs mt-1" },
+                        bindings: { text: "Priority: {{item.priority}}" },
+                        events: null,
+                        children: null,
+                      },
+                      {
+                        id: "template-view-details-button",
+                        node_type: "Button",
+                        props: {
+                          label: "View Details",
+                          variant: "outline",
+                          size: "sm",
+                          className: "mt-2",
+                        },
+                        bindings: null,
+                        events: {
+                          CLICK: {
+                            action: ActionType.SHOW_DETAIL,
+                            target: "task-detail",
+                            payload: { taskId: "{{item.id}}" },
+                          },
+                        },
+                        children: null,
+                      },
+                    ],
+                  },
+                ],
               },
             ],
           },
@@ -163,10 +205,11 @@ export function mockPlanner(
             node_type: "Detail",
             props: {
               title: "Task Details",
-              visible: "true",
+              visible: false,
             },
             bindings: {
-              data: JSON.stringify(taskData[0]),
+              visible: "{{isTaskDetailDialogVisible}}",
+              data: "{{selectedTask}}",
               fields: JSON.stringify([
                 { key: "title", label: "Title", type: "heading" },
                 { key: "description", label: "Description", type: "content" },
@@ -176,11 +219,7 @@ export function mockPlanner(
               ]),
             },
             events: {
-              onBack: {
-                action: "CLOSE_DETAIL",
-                target: "task-detail",
-                payload: {},
-              },
+              onBack: { action: ActionType.HIDE_DETAIL, target: "task-detail", payload: {} },
             },
             children: null,
           },
@@ -226,17 +265,19 @@ export async function callPlannerLLM(
 
   const startTime = Date.now();
 
-  let prompt: string;
-  if (routeResolution?.prompt) {
-    prompt = routeResolution.prompt;
-  } else {
-    // If no prompt from routeResolution (e.g., for full refresh or when enablePartialUpdates is false),
-    // build a default prompt using the main PlannerInput.
-    console.warn(
-      "[callPlannerLLM] No prompt provided by routeResolution or routeResolution is undefined. Building default prompt from input."
-    );
-    prompt = buildPrompt(input); // Fallback to generating a prompt from the input
-  }
+  // Always build the prompt from the planner input.
+  // The routeResolution might inform other aspects, but not the prompt directly anymore.
+  const templateValuesForPrompt =
+    routeResolution?.plannerInput.userContext === null
+      ? undefined
+      : routeResolution?.plannerInput.userContext;
+  const prompt = buildPrompt(
+    input,
+    routeResolution?.plannerInput.userContext?.promptTemplate as
+      | string
+      | undefined,
+    templateValuesForPrompt
+  );
 
   // Emit prompt created event
   await systemEvents.emit(

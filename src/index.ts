@@ -1,9 +1,5 @@
 // Export action router
-export {
-  ActionRouter,
-  ActionType,
-  type ActionRouteConfig,
-} from "./core/action-router";
+export { ActionRouter, type ActionRouteConfig } from "./core/action-router";
 
 // Export the main AutoUI component
 export { AutoUI } from "./AutoUI";
@@ -11,6 +7,9 @@ export type { AutoUIProps } from "./AutoUI";
 
 // Export core types for public use
 export { uiSpecNode, uiEvent, uiEventType } from "./schema/ui";
+export { ActionType } from "./schema/action-types";
+export { componentType } from "./schema/components";
+export { openAIUISpec } from "./schema/openai-ui-spec";
 
 export type {
   UISpecNode,

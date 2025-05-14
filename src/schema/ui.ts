@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { componentType } from "./components";
+import { DataContext } from "../core/bindings";
 
 /**
  * Event types that can be triggered by UI elements
@@ -39,19 +39,6 @@ export type AIResponseType = z.infer<typeof aiResponseType>;
 // --- Runtime Specific Types ---
 const runtimeRecord = z.record(z.unknown()).nullable();
 
-// --- OpenAI Specific Types (Simplified values, records can be null) ---
-const openAISimplifiedValue = z.string().nullable(); // Values can only be string or null
-
-// For OpenAI: props/bindings are records of these simplified values, or null.
-const openAIRecordSimplifiedNullable = z
-  .record(openAISimplifiedValue)
-  .nullable();
-
-// For OpenAI: event payloads can be null, or a record of these simplified values.
-const openAIEventPayloadSimplifiedNullable = z
-  .record(openAISimplifiedValue)
-  .nullable(); // Already was nullable, name changed for clarity
-
 // --- Interface for Runtime UISpecNode ---
 export interface UISpecNodeInterface {
   id: string;
@@ -72,60 +59,6 @@ export interface UISpecNodeInterface {
   > | null;
   children: UISpecNodeInterface[] | null;
 }
-
-// --- OpenAI Schema Definition (All fields required by Zod default, complex fields are nullable) ---
-const openAIBaseNode = z.object({
-  id: z.string().describe("Unique identifier for the UI node."),
-  node_type: componentType.describe(
-    "The type of UI component (e.g., Container, Text, Button, ListView)."
-  ),
-  props: openAIRecordSimplifiedNullable.describe(
-    'Component-specific properties (attributes). Values should be strings or null. E.g., for Header use { "title": "My Title" }; for Text use { "text": "My Text" }; for Button use { "label": "My Button Label" }.'
-  ),
-  bindings: openAIRecordSimplifiedNullable.describe(
-    'Data bindings map context paths to component props. Values are paths (e.g., "user.name") or templates (e.g., "{{item.title}}").\n' +
-      '**CRITICAL for ListView/Table:** The `data` key MUST point to the *exact array path* (e.g., { "data": "tasks.data" } or { "data": "userList" }), NOT the parent object. The `ListView`/`Table` itself should have one child node acting as a template. This template will be repeated for each item in the `data` array. Bindings within this template should use `{{item.propertyName}}` or `{{row.propertyName}}` (e.g., `bindings: { "text": "{{item.name}}" }`).\n' +
-      '**For Dialog visibility:** Use a `visible` binding key (e.g., `bindings: { "visible": "isMyDialogVisible" }`) pointing to a boolean path in the context to control whether the Dialog is shown or hidden.'
-  ),
-  events: z
-    .record(
-      z.string(), // Key is the UIEventType (e.g., "CLICK", "CHANGE")
-      z.object({
-        action: z
-          .string()
-          .describe(
-            'Action identifier (e.g., "UPDATE_DATA", "ADD_ITEM", "DELETE_ITEM", "VIEW_DETAIL", "HIDE_DETAIL"). Defines what operation to perform when the event occurs. Example: For an Input, use "UPDATE_DATA". For a Button deleting an item, use "DELETE_ITEM".'
-          ),
-        target: z
-          .string()
-          .describe(
-            'Target identifier. For data actions (UPDATE_DATA, ADD_ITEM, DELETE_ITEM), this MUST be the **data context path** (e.g., "user.name", "tasks.data"). For view actions (VIEW_DETAIL, HIDE_DETAIL), it often refers to a context key like "selected" or a specific node ID if direct DOM manipulation is intended (though context is preferred).'
-          ),
-        payload: openAIEventPayloadSimplifiedNullable.describe(
-          "Static payload to merge with the event's runtime payload. For example, for an ADD_ITEM action, this could contain default values for the new item if not provided by the runtime event. Runtime events supply dynamic data (e.g., input value for UPDATE_DATA, item ID for DELETE_ITEM, full item for VIEW_DETAIL)."
-        ),
-      })
-    )
-    .nullable()
-    .describe(
-      'Defines event handlers mapped from UIEventType (e.g., "CLICK", "CHANGE") to an action configuration. Enables interactivity and data updates.'
-    ), // Entire events object is nullable
-  children: z.null(), // Base children are null. When extended, it will be an array or null.
-});
-
-const openAINodeL4 = openAIBaseNode;
-
-const openAINodeL3 = openAIBaseNode.extend({
-  children: z.array(openAINodeL4).nullable(),
-});
-
-const openAINodeL2 = openAIBaseNode.extend({
-  children: z.array(openAINodeL3).nullable(),
-});
-
-export const openAIUISpec = openAIBaseNode.extend({
-  children: z.array(openAINodeL2).nullable(),
-});
 
 // --- Runtime Schema Definition ---
 export const uiSpecNode: z.ZodType<UISpecNodeInterface> = z.object({
@@ -148,7 +81,6 @@ export const uiSpecNode: z.ZodType<UISpecNodeInterface> = z.object({
 
 // --- Exported Types ---
 export type UISpecNode = z.infer<typeof uiSpecNode>;
-export type OpenAIUISpec = z.infer<typeof openAIUISpec>;
 
 /**
  * Actions that can be dispatched to the reducer
@@ -185,6 +117,10 @@ export const uiAction = z.discriminatedUnion("type", [
     type: z.literal("LOADING"),
     isLoading: z.boolean(),
   }),
+  z.object({
+    type: z.literal("SET_DATA_CONTEXT"),
+    payload: z.record(z.string(), z.unknown()),
+  }),
 ]);
 
 export type UIAction = z.infer<typeof uiAction>;
@@ -197,9 +133,10 @@ export const uiState = z.object({
   loading: z.boolean(),
   history: z.array(uiEvent),
   error: z.string().nullable(),
+  dataContext: z.record(z.string(), z.unknown()),
 });
 
-export type UIState = z.infer<typeof uiState>;
+export type UIState = z.infer<typeof uiState> & { dataContext: DataContext };
 
 /**
  * Input for the AI planner

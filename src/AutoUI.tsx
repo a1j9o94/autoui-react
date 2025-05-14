@@ -1,13 +1,19 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { UIEvent, UISpecNode, UIEventType, DataItem } from "./schema/ui";
+import { ActionType } from "./schema/action-types";
 import { useUIStateEngine, UseUIStateEngineOptions } from "./core/state";
-import { renderNode, renderShimmer } from "./core/renderer";
-import { resolveBindings, DataContext, executeAction } from "./core/bindings";
+import {
+  renderNode,
+  renderShimmer,
+  clearRenderedNodeCacheEntry,
+} from "./core/renderer";
+import { resolveBindings, DataContext } from "./core/bindings";
 import { EventManager, EventHook } from "./core/events";
 import {
   SystemEventType,
   SystemEventHook,
   systemEvents,
+  createSystemEvent,
 } from "./core/system-events";
 import { SchemaAdapter } from "./adapters/schema";
 import {
@@ -185,52 +191,45 @@ export const AutoUI: React.FC<AutoUIProps> = ({
   mockMode = false,
   planningConfig,
   integration = {},
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   scope = {},
   enablePartialUpdates = true,
   openaiApiKey,
 }) => {
-  // Initialize schema adapter if provided
   const [schemaAdapterInstance] = useState<SchemaAdapter | null>(null);
   const [dataContext, setDataContext] = useState<DataContext>({});
-  // Check if required components are available
   const [componentsAvailable, setComponentsAvailable] = useState(true);
-
-  // Use direct schema as the effective schema
-  const effectiveSchema = schema as Record<string, unknown>;
-  const scopedGoal = goal;
-  // Pass undefined for the router - it will use the default in the useUIStateEngine function
-
-  // State for the layout directly from the planner/reducer
-  // const [currentPlannerLayout, setCurrentPlannerLayout] = useState<UISpecNode | null>(null);
-
-  // State for the layout after bindings have been resolved
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [uiStatus, setUiStatus] = useState<
+    | "idle"
+    | "initializing"
+    | "resolving_bindings"
+    | "rendering"
+    | "event_processing"
+    | "error"
+  >("initializing");
   const [resolvedLayout, setResolvedLayout] = useState<UISpecNode | undefined>(
     undefined
   );
   const resolvedLayoutRef = useRef<UISpecNode | undefined | null>(null);
-
-  // State for the final rendered React element
   const [renderedNode, setRenderedNode] = useState<React.ReactElement | null>(
     null
   );
 
-  // Check if required components are available
+  // Restore effectiveSchema and scopedGoal definitions
+  const effectiveSchema = schema as Record<string, unknown>;
+  const scopedGoal = goal;
+
   useEffect(() => {
     if (componentAdapter === "shadcn") {
       setComponentsAvailable(areShadcnComponentsAvailable());
     }
   }, [componentAdapter]);
 
-  // Register system event hooks
   useEffect(() => {
     const unregisters: Array<() => void> = [];
-
-    // Register system event hooks
     if (systemEventHooks) {
       Object.entries(systemEventHooks).forEach(([eventType, hooks]) => {
         if (!hooks) return;
-
         (hooks as SystemEventHook[]).forEach((hook) => {
           const unregister = systemEvents.on(
             eventType as SystemEventType,
@@ -240,16 +239,10 @@ export const AutoUI: React.FC<AutoUIProps> = ({
         });
       });
     }
-
-    // Debug mode - log all system events to console EXCEPT FOR RENDER_START
-    // to prevent infinite rendering loops
     if (debugMode) {
       const debugHook: SystemEventHook = (event) => {
         console.debug(`[AutoUI Debug] System Event:`, event);
       };
-
-      // Register for all system event types EXCEPT RENDER_START and BINDING_RESOLUTION_START
-      // which can cause infinite loops when debugging
       Object.values(SystemEventType)
         .filter(
           (eventType) =>
@@ -261,46 +254,34 @@ export const AutoUI: React.FC<AutoUIProps> = ({
           unregisters.push(unregister);
         });
     }
-
     return () => {
       unregisters.forEach((unregister) => unregister());
     };
   }, [systemEventHooks, debugMode]);
 
-  // Initialize data context based on schema
   useEffect(() => {
     const initializeDataContext = async () => {
       let initialData: DataContext = {};
-
       if (schemaAdapterInstance) {
-        // Use schema adapter to initialize data context
         initialData = await schemaAdapterInstance.initializeDataContext();
       } else if (effectiveSchema) {
-        // Initialize with direct schema object
         Object.entries(effectiveSchema).forEach(([key, tableSchema]) => {
-          // Add schema information
           initialData[key] = {
             schema: tableSchema,
-            // For development, add sample data if available
             data:
               (tableSchema as { sampleData?: DataItem[] })?.sampleData || [],
             selected: null,
           };
         });
       }
-
-      // Add user context if provided
       if (userContext) {
         initialData.user = userContext;
       }
-
       setDataContext(initialData);
     };
-
     initializeDataContext();
   }, [effectiveSchema, schemaAdapterInstance, userContext]);
 
-  // Initialize the UI state engine with scoped goal
   const { state, handleEvent } = useUIStateEngine({
     schema: effectiveSchema,
     goal: scopedGoal,
@@ -313,16 +294,11 @@ export const AutoUI: React.FC<AutoUIProps> = ({
     openaiApiKey,
   });
 
-  // Create event manager
   const eventManagerRef = useRef(new EventManager());
 
-  // Register event hooks
   useEffect(() => {
     if (!eventHooks) return;
-
     const unregisters: Array<() => void> = [];
-
-    // Register global hooks
     if (eventHooks.all) {
       const unregister = eventManagerRef.current.register(
         "all",
@@ -335,11 +311,8 @@ export const AutoUI: React.FC<AutoUIProps> = ({
       );
       unregisters.push(unregister);
     }
-
-    // Register type-specific hooks
     Object.entries(eventHooks).forEach(([type, hooks]) => {
       if (type === "all" || !hooks) return;
-
       const unregister = eventManagerRef.current.register(
         [type as UIEventType],
         async (ctx) => {
@@ -351,16 +324,14 @@ export const AutoUI: React.FC<AutoUIProps> = ({
       );
       unregisters.push(unregister);
     });
-
-    // Cleanup on unmount or when hooks change
     return () => {
       unregisters.forEach((unregister) => unregister());
     };
   }, [eventHooks]);
 
-  // Process events and update data context
   const processEvent = useCallback(
     async (event: UIEvent) => {
+      setUiStatus("event_processing");
       const currentLayoutViaRef = resolvedLayoutRef.current;
 
       const shouldProceed = await eventManagerRef.current.processEvent(event);
@@ -368,162 +339,182 @@ export const AutoUI: React.FC<AutoUIProps> = ({
 
       if (!shouldProceed) {
         console.info(
-          "[AutoUI.processEvent] Event processing stopped by hooks",
+          "[AutoUI.processEvent] Event processing stopped by local hooks",
           event
         );
+        setUiStatus("idle");
         return;
       }
 
-      console.log(`[AutoUI.processEvent] Event for nodeId: ${event.nodeId}`);
-      if (currentLayoutViaRef) {
-        const taskListViewNode = currentLayoutViaRef.children?.find(
-          (c) => c.id === "taskListView" || c.id === "task-list-view"
-        );
-        let taskListViewChildrenSnapshot = null;
-        if (taskListViewNode && taskListViewNode.children) {
-          taskListViewChildrenSnapshot = taskListViewNode.children.map(
-            (child) => ({
-              id: child.id,
-              children: child.children?.map((grandChild) => ({
-                id: grandChild.id,
-                props: grandChild.props,
-                events: grandChild.events,
-              })),
-            })
-          );
+      // --- Attempt at targeted cache invalidation for task-detail ---
+      if (event.type === "CLICK" && currentLayoutViaRef && event.nodeId.includes("view-details-button")) {
+        // Heuristic: if a view-details-button is clicked.
+        // More robust would be to check the actual event config if readily available.
+        // For this specific known issue with task-detail:
+        const mainContent = currentLayoutViaRef.children?.find(c => c.id === "main-content");
+        const taskList = mainContent?.children?.find(c => c.id === "tasks-container")?.children?.find(c => c.id === "task-list");
+        const eventSourceListItemCard = taskList?.children?.find(item => item.children?.some(btn => btn.id === event.nodeId));
+        const buttonNode = eventSourceListItemCard?.children?.find(btn => btn.id === event.nodeId);
+
+        if (buttonNode?.events?.CLICK?.action === ActionType.SHOW_DETAIL && 
+            buttonNode?.events?.CLICK?.target === "task-detail") {
+          
+          // Construct the simplified key for the typical "hidden" state of task-detail
+          // Key format from renderer: `${node.id}:${node.props?.visible}:${(node.props?.data as {id?: string|number})?.id || 'no-data-selected'}`
+          const cacheKeyToClear = `task-detail:false:no-data-selected`;
+          clearRenderedNodeCacheEntry(cacheKeyToClear);
+          console.log(`[AutoUI.processEvent] Attempted to clear cache for task-detail using simplified key: ${cacheKeyToClear}`);
         }
-        console.log(
-          `[AutoUI.processEvent] Using currentLayoutViaRef snapshot (taskListView children):`,
-          JSON.stringify(taskListViewChildrenSnapshot, null, 2)
-        );
-      } else {
-        console.warn(
-          `[AutoUI.processEvent] currentLayoutViaRef is undefined when processing event: ${event.nodeId}.`
-        );
-        handleEvent(event, state.layout); // Fallback to state.layout from engine for the core handleEvent call
-        return;
       }
 
-      const findNodeById = (
-        node: UISpecNode | undefined | null,
-        id: string
-      ): UISpecNode | undefined => {
-        if (!node) return undefined;
-        if (node.id === id) return node;
-        if (node.children) {
-          for (const child of node.children) {
-            const found = findNodeById(child, id);
-            if (found) return found;
-          }
-        }
-        return undefined;
-      };
-
-      const sourceNode = findNodeById(currentLayoutViaRef, event.nodeId);
-      if (!sourceNode) {
-        console.warn(
-          `[AutoUI.processEvent] Node not found for event: ${event.nodeId} in currentLayoutViaRef.`
-        );
-        handleEvent(event, state.layout); // Fallback
-        return;
-      }
-
-      const eventConfig = sourceNode.events?.[event.type];
-      if (!eventConfig) {
-        console.warn(
-          `[AutoUI.processEvent] No event config found for ${event.type} on node ${event.nodeId}`
-        );
-        handleEvent(event, currentLayoutViaRef);
-        return;
-      }
-
-      const newContext = executeAction(
-        eventConfig.action,
-        eventConfig.target || "",
-        {
-          ...eventConfig.payload,
-          ...event.payload,
-        },
-        dataContext,
-        currentLayoutViaRef
+      // Log the event object being passed to the engine
+      console.log(
+        "[AutoUI.processEvent] Forwarding event to engine:",
+        JSON.stringify(event, null, 2)
       );
-      setDataContext(newContext);
-      handleEvent(event, currentLayoutViaRef, newContext);
+      console.log(
+        "[AutoUI.processEvent] Passing currentLayout ID:",
+        currentLayoutViaRef?.id
+      );
+      console.log(
+        "[AutoUI.processEvent] Passing dataContext keys to engine:",
+        Object.keys(dataContext)
+      );
+
+      // AutoUI no longer calls executeAction directly or setDataContext here.
+      // It passes its current dataContext to the engine.
+      // The engine, via the router, will call executeAction and return updatedDataContext,
+      // which AutoUI will then pick up via its useEffect on state.dataContext.
+      handleEvent(event, currentLayoutViaRef, dataContext);
+
+      // uiStatus will be managed by other effects based on state changes from the engine
     },
-    // Dependencies: handleEvent, onEvent, dataContext, eventManagerRef, state.layout (for fallback in handleEvent)
-    // resolvedLayout (state) is NOT a direct dependency anymore due to the ref.
-    [dataContext, handleEvent, onEvent, eventManagerRef, state.layout]
+    [
+      dataContext,
+      handleEvent,
+      onEvent,
+      eventManagerRef,
+      resolvedLayoutRef,
+      setUiStatus,
+    ]
   );
 
-  // Resolve bindings for the layout using the current data context
+  // Effect to update AutoUI's local dataContext when the engine's dataContext changes
+  useEffect(() => {
+    if (state.dataContext && Object.keys(state.dataContext).length > 0) {
+      if (JSON.stringify(dataContext) !== JSON.stringify(state.dataContext)) {
+        console.log(
+          "[AutoUI] Syncing local dataContext from engine state. New keys:",
+          Object.keys(state.dataContext),
+          "Old keys:",
+          Object.keys(dataContext)
+        );
+        setDataContext(state.dataContext);
+      }
+    }
+  }, [state.dataContext, dataContext]);
+
   const resolveLayoutBindings = useCallback(async () => {
-    if (state.layout && dataContext) {
-      // Existing logs
-      console.log(
-        "[AutoUI Debug] DataContext before resolving bindings:",
-        JSON.stringify(dataContext, null, 2)
-      );
-      console.log(
-        "[AutoUI Debug] Raw layout before resolving (from planner):",
-        JSON.stringify(state.layout, null, 2)
+    // Ensure dataContext is populated beyond just an empty object or initial user prop
+    const hasMeaningfulDataContext =
+      dataContext &&
+      Object.keys(dataContext).some(
+        (key) =>
+          key !== "user" ||
+          Object.keys(dataContext["user"] as object).length > 0
       );
 
-      // Correct list bindings before attempting to resolve them
-      const correctedLayout = correctListBindingsRecursive(
-        state.layout,
-        dataContext
-      );
+    if (state.layout && hasMeaningfulDataContext) {
       console.log(
-        "[AutoUI Debug] Layout after binding correction (before resolving):",
-        JSON.stringify(correctedLayout, null, 2)
+        `[AutoUI resolveLayoutBindings] Calling core resolveBindings for layout ID: ${state.layout.id}. DataContext being used: ${JSON.stringify(Object.keys(dataContext))}, isTaskDetailDialogVisible: ${dataContext.isTaskDetailDialogVisible}`
       );
-
-      const resolved = await resolveBindings(correctedLayout, dataContext);
-      setResolvedLayout(resolved);
-      resolvedLayoutRef.current = resolved; // Update the ref
-      console.log(
-        "[AutoUI Debug] Resolved layout after bindings:",
-        JSON.stringify(resolved, null, 2)
-      );
+      setUiStatus("resolving_bindings");
+      try {
+        const correctedLayout = correctListBindingsRecursive(
+          state.layout,
+          dataContext
+        );
+        const resolved = await resolveBindings(correctedLayout, dataContext);
+        setResolvedLayout(resolved);
+        resolvedLayoutRef.current = resolved;
+      } catch (err) {
+        console.error("Error resolving bindings:", err);
+        setUiStatus("error");
+      }
     } else {
+      if (!state.layout)
+        console.log(
+          "[AutoUI] Skipping resolveBindings: state.layout is null/undefined"
+        );
+      if (!hasMeaningfulDataContext)
+        console.log(
+          "[AutoUI] Skipping resolveBindings: dataContext is not meaningfully populated yet"
+        );
       setResolvedLayout(undefined);
-      resolvedLayoutRef.current = undefined; // Update the ref
+      resolvedLayoutRef.current = undefined;
+      if (!state.loading && uiStatus !== "initializing") setUiStatus("idle");
     }
   }, [state.layout, dataContext]);
 
-  // Call the stable function in the effect
   useEffect(() => {
     resolveLayoutBindings();
   }, [resolveLayoutBindings]);
 
-  // Handle async rendering of the node with a stable reference
   const renderResolvedLayout = useCallback(async () => {
-    const layoutToRender = resolvedLayoutRef.current;
-    if (layoutToRender) {
+    if (resolvedLayout) {
+      setUiStatus("rendering");
+      console.log(
+        "[AutoUI Debug] Rendering with resolvedLayout:",
+        JSON.stringify(resolvedLayout, null, 2)
+      );
       try {
+        systemEvents.emit(
+          createSystemEvent(SystemEventType.RENDER_START, {
+            layout: resolvedLayout,
+          })
+        );
         const rendered = await renderNode(
-          layoutToRender,
+          resolvedLayout,
           componentAdapter as "shadcn",
           processEvent
         );
         setRenderedNode(rendered);
+        systemEvents.emit(
+          createSystemEvent(SystemEventType.RENDER_COMPLETE, {
+            layout: resolvedLayout,
+            renderTimeMs: 0,
+          })
+        );
+        setUiStatus("idle");
       } catch (err) {
         console.error("Error rendering node:", err);
-        setRenderedNode(
-          <div className="autoui-error">Error rendering UI. Check console.</div>
-        ); // Show error in UI
+        setUiStatus("error");
       }
     } else {
       setRenderedNode(null);
+      if (!state.loading && uiStatus !== "initializing") setUiStatus("idle");
     }
-  }, [componentAdapter, processEvent]);
+  }, [resolvedLayout, componentAdapter, processEvent]);
 
-  // Call the stable render function in the effect
   useEffect(() => {
     renderResolvedLayout();
   }, [renderResolvedLayout]);
 
-  // If components are not available, show error message
+  useEffect(() => {
+    if (uiStatus !== "error") {
+      setUiStatus("initializing");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (uiStatus === "initializing" && state.layout && !state.loading) {
+      // Transition handled by other effects
+    } else if (uiStatus === "initializing" && !state.loading && !state.layout) {
+      if (!state.error) setUiStatus("idle");
+    }
+  }, [state.loading, state.layout, state.error, uiStatus]);
+
+  // Simplified JSX for debugging linter errors
   if (!componentsAvailable) {
     return (
       <div className="autoui-error p-4 border border-red-300 bg-red-50 text-red-700 rounded">
@@ -535,55 +526,24 @@ export const AutoUI: React.FC<AutoUIProps> = ({
     );
   }
 
-  // Render UI
   return (
     <div
       className={`autoui-root ${integration.className || ""}`}
       id={integration.id}
-      data-mode={integration.mode}
-      data-scope={scope?.type || "full"}
     >
-      {state.loading || !resolvedLayoutRef.current ? ( // Use ref for loading check
-        <div className="autoui-loading">
-          {state.layout ? (
-            renderShimmer(state.layout, componentAdapter as "shadcn")
-          ) : (
-            <div className="autoui-shimmer-container">
-              <div className="autoui-shimmer-header" />
-              <div className="autoui-shimmer-content" />
-            </div>
-          )}
-        </div>
-      ) : (
-        // Render the resolved layout
+      <div>Current Status: {uiStatus}</div>
+      {uiStatus === "idle" && renderedNode && (
         <div className="autoui-content">{renderedNode}</div>
       )}
-
-      {state.error && (
-        <div className="autoui-error p-4 border border-red-300 bg-red-50 dark:bg-red-900 dark:border-red-700 rounded-md">
-          <p className="autoui-error-title text-lg font-semibold text-red-700 dark:text-red-300 mb-2">
-            Error generating UI
-          </p>
-          <p className="autoui-error-message text-sm text-red-600 dark:text-red-300">
-            {state.error}
-          </p>
-
-          {!mockMode && (
-            <div className="mt-4 text-sm text-red-600 dark:text-red-300">
-              <p>This could be because:</p>
-              <ul className="list-disc pl-5 mt-2">
-                <li>Your OpenAI API key is missing or invalid</li>
-                <li>The OpenAI service is experiencing issues</li>
-                <li>Your API rate limit has been exceeded</li>
-              </ul>
-              <p className="mt-2">
-                Try setting <code>mockMode=true</code> to use sample data
-                instead.
-              </p>
-            </div>
-          )}
-        </div>
-      )}
+      {state.error && <div className="autoui-error">Error: {state.error}</div>}
+      {/* Add a simple shimmer condition for testing */}
+      {(uiStatus === "initializing" || state.loading) &&
+        state.layout &&
+        !state.error && (
+          <div className="autoui-loading">
+            {renderShimmer(state.layout, componentAdapter as "shadcn")}
+          </div>
+        )}
     </div>
   );
 };

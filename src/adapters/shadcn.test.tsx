@@ -145,8 +145,13 @@ describe("Shadcn Adapter - renderNode", () => {
     const detailNode = createMockNode({
       id: "detail-1",
       node_type: "Detail",
-      bindings: { data, fields },
-      props: { title: "Item Details" },
+      bindings: null, // Bindings are not used directly by adapter for these, resolveBindings would have moved them
+      props: { 
+        title: "Item Details", 
+        visible: true, // Explicitly set for clarity
+        data,      // Moved from bindings to props
+        fields     // Moved from bindings to props
+      },
     });
 
     const { getByText } = render(renderNode(detailNode, mockProcessEvent));

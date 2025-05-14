@@ -2,13 +2,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { SpyInstance } from "vitest";
 import { PlannerInput, UIEvent, UISpecNode } from "../schema/ui";
-import { UIEventType } from "./action-types";
-import { ActionType } from "./action-router";
+import { ActionType, UIEventType } from "../schema/action-types";
 // Restore static imports
 import { mockPlanner, callPlannerLLM, processEvent } from "./planner";
-import { ActionRouter } from "./action-router";
-import { RouteResolution } from "./action-router";
-import { buildPrompt } from "./action-router";
+import { ActionRouter, RouteResolution } from "./action-router";
 
 // Mock the system events
 vi.mock("./system-events", () => ({
@@ -140,9 +137,7 @@ describe("Planner", () => {
           history: null,
           userContext: null,
         };
-        const prompt = buildPrompt(input); // Generate default prompt
         const mockRouteResolution: RouteResolution = {
-          prompt,
           actionType: ActionType.FULL_REFRESH,
           targetNodeId: "root",
           plannerInput: input,
@@ -176,9 +171,7 @@ describe("Planner", () => {
           history: null,
           userContext: null,
         };
-        const prompt = buildPrompt(input); // Generate default prompt with updated guidance
         const mockRouteResolution: RouteResolution = {
-          prompt,
           actionType: ActionType.FULL_REFRESH,
           targetNodeId: "root",
           plannerInput: input,
@@ -213,9 +206,7 @@ describe("Planner", () => {
           history: null,
           userContext: null,
         };
-        const prompt = buildPrompt(input);
         const mockRouteResolution: RouteResolution = {
-          prompt,
           actionType: ActionType.FULL_REFRESH,
           targetNodeId: "root",
           plannerInput: input,
@@ -251,7 +242,8 @@ describe("Planner", () => {
       // Use statically imported processEvent
       const emptyRouter = new ActionRouter();
       const resolveRouteSpy = vi.spyOn(emptyRouter, "resolveRoute");
-      resolveRouteSpy.mockReturnValue(null as unknown as RouteResolution);
+      // Mock to simulate the promise resolving to a null-like RouteResolution
+      resolveRouteSpy.mockResolvedValue(null as unknown as RouteResolution);
       const event: UIEvent = {
         type: UIEventType.CLICK,
         nodeId: "button",

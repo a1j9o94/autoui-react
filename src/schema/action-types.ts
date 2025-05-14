@@ -15,6 +15,8 @@ export enum ActionType {
   FULL_REFRESH = "FULL_REFRESH", // Generate a completely new UI
   UPDATE_NODE = "UPDATE_NODE", // Update a specific node, potentially with new children
   UPDATE_DATA = "UPDATE_DATA", // Add this for input changes
+  ADD_ITEM = "ADD_ITEM", // Add an item to a list
+  DELETE_ITEM = "DELETE_ITEM", // Delete an item from a list
   ADD_DROPDOWN = "ADD_DROPDOWN", // Add a dropdown to a specific node
   SHOW_DETAIL = "SHOW_DETAIL", // Show a detail view
   HIDE_DETAIL = "HIDE_DETAIL", // Hide a detail view
@@ -26,4 +28,4 @@ export enum ActionType {
   OPEN_DIALOG = "OPEN_DIALOG", // Open a dialog (for clarity)
   CLOSE_DIALOG = "CLOSE_DIALOG", // Close a dialog (for clarity)
   UPDATE_CONTEXT = "UPDATE_CONTEXT", // Generic context update
-} 
+}

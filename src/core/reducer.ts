@@ -317,6 +317,13 @@ export function uiReducer(state: UIState, action: UIAction): UIState {
       };
     }
 
+    case "SET_DATA_CONTEXT": {
+      return {
+        ...state,
+        dataContext: action.payload,
+      };
+    }
+
     default:
       return state;
   }
@@ -327,7 +334,8 @@ export function uiReducer(state: UIState, action: UIAction): UIState {
  */
 export const initialState: UIState = {
   layout: null,
-  loading: false,
-  history: [],
+  loading: true,
   error: null,
+  history: [],
+  dataContext: {},
 };

@@ -7,6 +7,7 @@ import {
   DataContext,
   executeAction,
 } from "./bindings"; // Adjust path as necessary
+import { ActionType } from "../schema/action-types"; // Correct import for ActionType
 import { UISpecNode, DataItem } from "../schema/ui"; // Re-added UISpecNode and Added DataItem
 import * as SystemEvents from "./system-events"; // Import to mock
 
@@ -1140,20 +1141,30 @@ interface TestTaskItem {
 
 describe("executeAction", () => {
   let context: DataContext;
+  let baseTasks: { data: TestTaskItem[]; schema: Record<string, unknown> };
 
   beforeEach(() => {
-    // Base context for action tests
+    baseTasks = {
+      data: [
+        { id: "t1", title: "Task 1", status: "pending", description: "Desc 1" },
+        {
+          id: "t2",
+          title: "Task 2",
+          status: "in_progress",
+          description: "Desc 2",
+        },
+        { id: "t3", title: "Task 3", status: "pending", description: "Desc 3" },
+      ],
+      schema: {},
+    };
     context = {
       user: { id: "u1", name: "Alice" },
-      tasks: {
-        data: [
-          { id: "t1", title: "Task 1", status: "pending" },
-          { id: "t2", title: "Task 2", status: "in_progress" },
-          { id: "t3", title: "Task 3", status: "pending" },
-        ],
-        schema: {}, // Mock schema if needed by actions
-      },
+      tasks: { ...baseTasks },
       selected: null,
+      selectedTask: null,
+      isTaskDetailDialogVisible: false,
+      selectedItemForDetail: null,
+      isDetailViewOpen: false,
       form: {
         newTaskTitle: "",
         newTaskStatus: "pending",
@@ -1209,12 +1220,14 @@ describe("executeAction", () => {
     consoleWarnSpy.mockRestore();
   });
 
+  // Comment out the VIEW_DETAIL test as the string action was removed
+  /*
   it("should handle VIEW_DETAIL action, setting context.selected", () => {
     const itemToSelect = { id: "t2", title: "Task 2", status: "in_progress" };
     const newContext = executeAction(
-      "VIEW_DETAIL",
-      "detail-node-id", // target node id (currently unused by logic, but part of signature)
-      { item: itemToSelect }, // payload contains the item to select
+      "VIEW_DETAIL", // This was a string literal, now unhandled by default
+      "detail-node-id", 
+      { item: itemToSelect }, 
       context
     );
     expect(newContext.selected).toEqual(itemToSelect);
@@ -1226,12 +1239,13 @@ describe("executeAction", () => {
       "VIEW_DETAIL",
       "detail-node-id",
       {
-        /* no item property */
+        // no item property 
       },
       context
     );
     expect(newContext).toEqual(context); // Should remain unchanged
   });
+  */
 
   it("should handle ADD_ITEM action, adding item to end of list specified by target path", () => {
     const newItem = { id: "t4", title: "Task 4", status: "new" };
@@ -1393,14 +1407,14 @@ describe("executeAction", () => {
     consoleWarnSpy.mockRestore();
   });
 
-  it("should handle SHOW_DIALOG action, setting selectedTask and visibility flag", () => {
+  it("should handle SHOW_DETAIL action, setting selectedTask and visibility flag", () => {
     const contextWithTasks = {
       ...context,
       tasks: {
         data: [
           { id: "task-1", title: "Task One", description: "Description one" },
           { id: "task-2", title: "Task Two", description: "Description two" },
-        ] as DataItem[], // Ensure it's treated as DataItem[]
+        ] as DataItem[],
         schema: {},
       },
       selectedTask: null,
@@ -1409,10 +1423,14 @@ describe("executeAction", () => {
 
     // Case 1: Valid taskId
     let newContext = executeAction(
-      "SHOW_DIALOG",
-      "taskDetailDialogNodeId", // target node id
-      { taskId: "task-1" }, // payload with taskId
+      ActionType.SHOW_DETAIL,
+      "taskDetailDialogNodeId",
+      { taskId: "task-1" },
       contextWithTasks
+    );
+    console.log(
+      "[Test Debug] SHOW_DETAIL Case 1 - newContext after executeAction:",
+      JSON.stringify(newContext)
     );
 
     expect((newContext.selectedTask as DataItem)?.id).toBe("task-1");
@@ -1421,26 +1439,31 @@ describe("executeAction", () => {
 
     // Case 2: Invalid taskId
     newContext = executeAction(
-      "SHOW_DIALOG",
+      ActionType.SHOW_DETAIL,
       "taskDetailDialogNodeId",
       { taskId: "task-nonexistent" },
-      contextWithTasks // Use original context for a clean test of this case
+      contextWithTasks
+    );
+    console.log(
+      "[Test Debug] SHOW_DETAIL Case 2 - newContext after executeAction:",
+      JSON.stringify(newContext)
     );
     expect(newContext.selectedTask).toBeNull();
-    expect(newContext.isTaskDetailDialogVisible).toBe(true); // Dialog still becomes visible
+    expect(newContext.isTaskDetailDialogVisible).toBe(true);
 
     // Case 3: Missing taskId in payload
     newContext = executeAction(
-      "SHOW_DIALOG",
+      ActionType.SHOW_DETAIL,
       "taskDetailDialogNodeId",
-      {}, // Empty payload
-      contextWithTasks // Use original context
+      {},
+      contextWithTasks
     );
-    // selectedTask should remain as it was in contextWithTasks (null initially for this sub-case)
-    // or be explicitly set to null if that's the desired handling for missing taskId.
-    // Current SHOW_DIALOG logic would leave it null if payload.taskId is missing.
+    console.log(
+      "[Test Debug] SHOW_DETAIL Case 3 - newContext after executeAction:",
+      JSON.stringify(newContext)
+    );
     expect(newContext.selectedTask).toBeNull();
-    expect(newContext.isTaskDetailDialogVisible).toBe(true); // Dialog becomes visible
+    expect(newContext.isTaskDetailDialogVisible).toBe(true);
   });
 
   it("should return original context for unknown actions", () => {
@@ -1456,35 +1479,192 @@ describe("executeAction", () => {
   });
 
   it("should preserve other parts of the context when updating", () => {
-    // Test UPDATE_DATA preserves 'selected'
-    let newContext = executeAction(
-      "UPDATE_DATA",
+    const newContext = executeAction(
+      ActionType.UPDATE_DATA,
       "form.newTaskTitle",
       { value: "Test" },
       context
     );
     expect(newContext.selected).toBeNull();
     expect(newContext.tasks).toEqual(context.tasks);
-
-    // Test ADD_ITEM preserves 'user' and 'form'
-    const newItem = { id: "t4", title: "Task 4", status: "new" };
-    newContext = executeAction(
-      "ADD_ITEM",
-      "tasks.data",
-      { item: newItem },
-      context
-    );
     expect(newContext.user).toEqual(context.user);
-    expect(newContext.form).toEqual(context.form);
+    expect(newContext.selectedTask).toBeNull();
+    expect(newContext.isTaskDetailDialogVisible).toBe(false);
+  });
 
-    // Test DELETE_ITEM preserves 'user' and 'form'
-    newContext = executeAction(
-      "DELETE_ITEM",
-      "tasks.data",
-      { id: "t1" },
-      context
-    );
-    expect(newContext.user).toEqual(context.user);
-    expect(newContext.form).toEqual(context.form);
+  describe("ActionType.SHOW_DETAIL", () => {
+    it("should set selectedTask and make dialog visible for a valid taskId", () => {
+      const newContext = executeAction(
+        ActionType.SHOW_DETAIL,
+        "taskDetailDialogNodeId",
+        { taskId: "t1" },
+        context
+      );
+      expect((newContext.selectedTask as TestTaskItem)?.id).toBe("t1");
+      expect(newContext.isTaskDetailDialogVisible).toBe(true);
+    });
+
+    it("should set selectedTask to null and make dialog visible for an invalid taskId", () => {
+      const newContext = executeAction(
+        ActionType.SHOW_DETAIL,
+        "taskDetailDialogNodeId",
+        { taskId: "t-nonexistent" },
+        context
+      );
+      expect(newContext.selectedTask).toBeNull();
+      expect(newContext.isTaskDetailDialogVisible).toBe(true);
+    });
+
+    it("should set selectedTask to null and make dialog visible if taskId is missing in payload", () => {
+      const newContext = executeAction(
+        ActionType.SHOW_DETAIL,
+        "taskDetailDialogNodeId",
+        {},
+        context
+      );
+      expect(newContext.selectedTask).toBeNull();
+      expect(newContext.isTaskDetailDialogVisible).toBe(true);
+    });
+
+    it("should update selectedTask if one is already selected", () => {
+      const contextWithTaskSelected = {
+        ...context,
+        selectedTask: baseTasks.data[0], // t1 is selected
+        isTaskDetailDialogVisible: true,
+      };
+      const newContext = executeAction(
+        ActionType.SHOW_DETAIL,
+        "taskDetailDialogNodeId",
+        { taskId: "t2" }, // Select t2
+        contextWithTaskSelected
+      );
+      expect((newContext.selectedTask as TestTaskItem)?.id).toBe("t2");
+      expect(newContext.isTaskDetailDialogVisible).toBe(true);
+    });
+  });
+
+  describe("ActionType.HIDE_DIALOG", () => {
+    it("should clear selectedTask and hide dialog", () => {
+      const contextWithDialogVisible = {
+        ...context,
+        selectedTask: baseTasks.data[0],
+        isTaskDetailDialogVisible: true,
+      };
+      const newContext = executeAction(
+        ActionType.HIDE_DIALOG,
+        "taskDetailDialogNodeId", // target could be the dialog ID
+        {},
+        contextWithDialogVisible
+      );
+      expect(newContext.selectedTask).toBeNull();
+      expect(newContext.isTaskDetailDialogVisible).toBe(false);
+    });
+  });
+
+  describe("ActionType.OPEN_DIALOG", () => {
+    it("should make a generic dialog visible (e.g., task detail dialog by default)", () => {
+      const newContext = executeAction(
+        ActionType.OPEN_DIALOG,
+        "taskDetailDialogNodeId", // Targetting the specific known dialog
+        {},
+        context
+      );
+      expect(newContext.isTaskDetailDialogVisible).toBe(true);
+    });
+    // Add more tests if OPEN_DIALOG should handle other dialogIds or set other flags
+  });
+
+  describe("ActionType.CLOSE_DIALOG", () => {
+    it("should hide a generic dialog and clear related data (e.g., task detail dialog)", () => {
+      const contextWithDialogVisible = {
+        ...context,
+        selectedTask: baseTasks.data[0],
+        isTaskDetailDialogVisible: true,
+      };
+      const newContext = executeAction(
+        ActionType.CLOSE_DIALOG,
+        "taskDetailDialogNodeId", // Targetting the specific known dialog
+        {},
+        contextWithDialogVisible
+      );
+      expect(newContext.isTaskDetailDialogVisible).toBe(false);
+      expect(newContext.selectedTask).toBeNull(); // Assuming taskDetailDialog implies clearing selectedTask
+    });
+  });
+
+  describe("ActionType.HIDE_DETAIL", () => {
+    it("should clear selectedItemForDetail and set isDetailViewOpen to false", () => {
+      const contextWithDetailOpen = {
+        ...context,
+        selectedItemForDetail: { id: "detail-1", content: "Some detail" },
+        isDetailViewOpen: true,
+      };
+      const newContext = executeAction(
+        ActionType.HIDE_DETAIL,
+        "genericDetailViewNodeId", // Target could be the detail pane ID
+        {},
+        contextWithDetailOpen
+      );
+      expect(newContext.selectedItemForDetail).toBeNull();
+      expect(newContext.isDetailViewOpen).toBe(false);
+    });
+  });
+
+  describe("ActionType.SAVE_TASK_CHANGES", () => {
+    it("should update task in tasks.data, clear selectedTask, and hide dialog", () => {
+      const modifiedTaskData = {
+        title: "Updated Task 1 Title",
+        status: "completed",
+      };
+      const contextWithTaskSelected = {
+        ...context,
+        selectedTask: { ...baseTasks.data[0], ...modifiedTaskData }, // Simulate form changes applied to selectedTask
+        isTaskDetailDialogVisible: true,
+      };
+      const newContext = executeAction(
+        ActionType.SAVE_TASK_CHANGES,
+        baseTasks.data[0].id, // target is the taskId
+        {}, // Payload from form might be merged into selectedTask already, or passed here
+        contextWithTaskSelected
+      );
+      const updatedTaskInList = (
+        newContext.tasks as { data: TestTaskItem[] }
+      ).data.find((t) => t.id === baseTasks.data[0].id);
+      expect(updatedTaskInList?.title).toBe("Updated Task 1 Title");
+      expect(updatedTaskInList?.status).toBe("completed");
+      expect(newContext.selectedTask).toBeNull();
+      expect(newContext.isTaskDetailDialogVisible).toBe(false);
+    });
+
+    it("should not save if target taskId does not match selectedTask id", () => {
+      const consoleWarnSpy = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => {});
+      const contextWithTaskSelected = {
+        ...context,
+        selectedTask: baseTasks.data[0],
+        isTaskDetailDialogVisible: true,
+      };
+      const newContext = executeAction(
+        ActionType.SAVE_TASK_CHANGES,
+        "t2",
+        { title: "Won't Save" },
+        contextWithTaskSelected
+      );
+      expect((newContext.tasks as { data: TestTaskItem[] }).data[0].title).toBe(
+        "Task 1"
+      );
+      expect(newContext.selectedTask).toEqual(baseTasks.data[0]);
+      expect(newContext.isTaskDetailDialogVisible).toBe(true);
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        "[executeAction] SAVE_TASK_CHANGES: Could not save. Task list, selected task, or ID mismatch.",
+        expect.objectContaining({
+          taskIdToSave: "t2",
+          selectedTaskDataId: "t1",
+          currentTasksExists: true,
+        })
+      );
+      consoleWarnSpy.mockRestore();
+    });
   });
 });

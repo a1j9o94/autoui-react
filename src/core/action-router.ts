@@ -1,6 +1,9 @@
 import { UIEvent, UISpecNode, PlannerInput } from "../schema/ui";
 import { DataContext } from "./bindings";
 import { findNodeById } from "./reducer";
+import { ActionType } from "../schema/action-types";
+import { callPlannerLLM } from "./planner";
+import { executeAction } from "./bindings";
 
 // --- Constants for Prompt Generation ---
 
@@ -135,23 +138,6 @@ Respond ONLY with the JSON UI specification and no other text.
 }
 
 /**
- * Action types supported by the router
- */
-export enum ActionType {
-  FULL_REFRESH = "FULL_REFRESH", // Generate a completely new UI
-  UPDATE_NODE = "UPDATE_NODE", // Update a specific node, potentially with new children
-  UPDATE_DATA = "UPDATE_DATA", // Add this for input changes
-  ADD_DROPDOWN = "ADD_DROPDOWN", // Add a dropdown to a specific node
-  SHOW_DETAIL = "SHOW_DETAIL", // Show a detail view
-  HIDE_DETAIL = "HIDE_DETAIL", // Hide a detail view
-  HIDE_DIALOG = "HIDE_DIALOG", // Explicitly add HIDE_DIALOG
-  SAVE_TASK_CHANGES = "SAVE_TASK_CHANGES", // Add action for saving
-  TOGGLE_STATE = "TOGGLE_STATE", // Toggle a boolean state (expanded, selected, etc.)
-  UPDATE_FORM = "UPDATE_FORM", // Update a form based on selections
-  NAVIGATE = "NAVIGATE", // Navigate to a different view
-}
-
-/**
  * Routing configuration for an action
  */
 export interface ActionRouteConfig {
@@ -168,7 +154,8 @@ export interface RouteResolution {
   actionType: ActionType;
   targetNodeId: string;
   plannerInput: PlannerInput;
-  prompt: string;
+  directUpdateLayout?: UISpecNode | null;
+  updatedDataContext?: DataContext;
 }
 
 /**
@@ -187,14 +174,15 @@ export class ActionRouter {
    * @param dataContext - Current data context
    * @returns Route resolution or null if no match
    */
-  public resolveRoute(
+  public async resolveRoute(
     event: UIEvent,
     schema: Record<string, unknown>,
     layout: UISpecNode | null,
     dataContext: DataContext,
     goal: string,
-    userContext?: Record<string, unknown>
-  ): RouteResolution {
+    userContext?: Record<string, unknown>,
+    openaiApiKey?: string
+  ): Promise<RouteResolution> {
     console.log(
       `[ActionRouter Debug] resolveRoute called for event type: ${event.type}, nodeId: ${event.nodeId}`
     );
@@ -239,7 +227,6 @@ export class ActionRouter {
 
     let actionType: ActionType;
     let determinedTargetNodeId: string;
-    let promptTemplate: string | undefined = undefined;
     let contextKeys: string[] | undefined = undefined;
     let determinedNodeConfigPayload: Record<string, unknown> | null = null;
 
@@ -252,32 +239,25 @@ export class ActionRouter {
         : null;
 
       // Ensure SHOW_DIALOG from event config is mapped to ActionType.SHOW_DETAIL for routing logic
-      if (nodeConfig.action === "SHOW_DIALOG") {
+      if (nodeConfig.action === ActionType.SHOW_DETAIL) {
         actionType = ActionType.SHOW_DETAIL;
-      } else if (nodeConfig.action === "HIDE_DIALOG") {
+      } else if (nodeConfig.action === ActionType.HIDE_DIALOG) {
         actionType = ActionType.HIDE_DIALOG; // Ensure this is correctly typed
-      } else if (nodeConfig.action === "SAVE_TASK_CHANGES") {
+      } else if (nodeConfig.action === ActionType.SAVE_TASK_CHANGES) {
         actionType = ActionType.SAVE_TASK_CHANGES;
       }
 
       if (actionType === ActionType.SHOW_DETAIL) {
         // Ensure template refers to selectedTask which is set by executeAction("SHOW_DIALOG",...)
-        promptTemplate =
-          "Action: ${actionType}. Show detail for ${nodeId} (source of event) which targets dialog ${targetNodeId}. Selected Task ID: ${selectedTask_id}. Current task details are in selectedTask. Generate the UI for the dialog content based on these details.";
         contextKeys = ["selectedTask"]; // Ensure this matches what executeAction sets
       } else if (actionType === ActionType.HIDE_DIALOG) {
-        promptTemplate =
-          "Action: ${actionType}. User wants to hide dialog ${targetNodeId}. Respond with an updated UI spec for the dialog node '${targetNodeId}' where its visibility is set to false (e.g., by setting its 'visible' prop to false).";
+        contextKeys = ["targetNodeId"];
       } else if (actionType === ActionType.SAVE_TASK_CHANGES) {
-        promptTemplate =
-          "Action: ${actionType}. User clicked save for task ID ${eventPayload_taskId} (or selectedTask.id if available). Current details are in selectedTask. Update task data. The dialog ${targetNodeId} should then be hidden. Refresh the main task list.";
         contextKeys = ["selectedTask", "tasks"]; // Provide relevant context
       } else if (actionType === ActionType.NAVIGATE) {
-        promptTemplate =
-          "Action: ${actionType}. Navigate from ${nodeId} to view: ${targetNodeId}";
+        contextKeys = ["targetNodeId"];
       } else {
-        promptTemplate =
-          "Action: ${actionType}. Event ${eventType} on node ${nodeId}. Target: ${targetNodeId}. Goal: ${goal}";
+        contextKeys = ["nodeId"];
       }
     } else {
       // Default behaviors if no specific nodeConfig.action
@@ -285,19 +265,10 @@ export class ActionRouter {
         case "INIT":
           actionType = ActionType.FULL_REFRESH;
           determinedTargetNodeId = "root";
-          promptTemplate =
-            "Action: ${actionType}. Initialize the application view for the goal: ${goal}";
           break;
         case "CLICK":
           actionType = ActionType.FULL_REFRESH;
           determinedTargetNodeId = "root"; // Default for unconfigured clicks (button or otherwise)
-          if (sourceNode?.node_type === "Button") {
-            promptTemplate =
-              "Action: ${actionType}. Button ${nodeId} clicked. Goal: ${goal}";
-          } else {
-            promptTemplate =
-              "Action: ${actionType}. Generic click on ${nodeId}. Goal: ${goal}";
-          }
           break;
         case "CHANGE":
           if (
@@ -308,20 +279,17 @@ export class ActionRouter {
           ) {
             actionType = ActionType.UPDATE_DATA;
             determinedTargetNodeId = sourceNode.id;
-            promptTemplate =
-              "Action: ${actionType}. Update data for ${nodeId} due to change. New value: ${eventPayload_value}. Goal: ${goal}";
+            // promptTemplate = "Action: ${actionType}. Update data for ${nodeId} due to change. New value: ${eventPayload_value}. Goal: ${goal}";
           } else {
             actionType = ActionType.FULL_REFRESH;
             determinedTargetNodeId = "root";
-            promptTemplate =
-              "Action: ${actionType}. Change event on ${nodeId}. Goal: ${goal}";
+            // promptTemplate = "Action: ${actionType}. Change event on ${nodeId}. Goal: ${goal}";
           }
           break;
         default:
           actionType = ActionType.FULL_REFRESH;
           determinedTargetNodeId = "root";
-          promptTemplate =
-            "Action: ${actionType}. Unhandled event ${eventType} on ${nodeId}. Goal: ${goal}";
+          // promptTemplate = "Action: ${actionType}. Unhandled event ${eventType} on ${nodeId}. Goal: ${goal}";
           console.warn(
             `[ActionRouter] Unhandled event type: ${event.type} for node ${event.nodeId}, falling back to FULL_REFRESH.`
           );
@@ -417,17 +385,141 @@ export class ActionRouter {
       }
     }
 
-    const finalPrompt = buildPrompt(
-      plannerInput,
-      promptTemplate,
-      templateValues
-    );
+    // --- Consolidate HIDE actions ---
+    if (
+      (actionType === ActionType.HIDE_DIALOG ||
+        actionType === ActionType.CLOSE_DIALOG ||
+        actionType === ActionType.HIDE_DETAIL) &&
+      layout
+    ) {
+      const clonedLayout: UISpecNode = JSON.parse(JSON.stringify(layout));
+      const dialogNodeToHide = findNodeById(clonedLayout, determinedTargetNodeId);
 
+      if (dialogNodeToHide) {
+        if (!dialogNodeToHide.props) dialogNodeToHide.props = {};
+        dialogNodeToHide.props.visible = false;
+        if (dialogNodeToHide.bindings && dialogNodeToHide.bindings.visible !== undefined) {
+          delete dialogNodeToHide.bindings.visible;
+        }
+      }
+      // Return the entire cloned layout with the specific node modified
+      return {
+        actionType,
+        targetNodeId: determinedTargetNodeId,
+        plannerInput,
+        directUpdateLayout: clonedLayout, // Return full modified layout
+        updatedDataContext: dataContext, // Pass through existing dataContext, bindings will update based on it
+      };
+    }
+
+    // --- Consolidate SHOW actions (data context for content, direct layout for visibility) ---
+    if (
+      (actionType === ActionType.SHOW_DETAIL || actionType === ActionType.OPEN_DIALOG) &&
+      layout
+    ) {
+      const newDataContext = executeAction(
+        actionType as string,
+        determinedTargetNodeId,
+        finalEventPayload || {},
+        dataContext
+      );
+
+      // Create a fresh copy to modify
+      const layoutToUpdate: UISpecNode = JSON.parse(JSON.stringify(layout));
+      
+      const updateVisibility = (node: UISpecNode, targetId: string): boolean => {
+        if (node.id === targetId) {
+          if (!node.props) node.props = {};
+          node.props.visible = true;
+          // Crucially, ensure the binding is still there if it's meant to be
+          // If the original mockPlanner node has it, it should persist through clones
+          // For now, let's assume it *should* be there.
+          console.log(`[ActionRouter SHOW_DETAIL] Set ${targetId}.props.visible = true. Bindings:`, JSON.stringify(node.bindings));
+          return true;
+        }
+        if (node.children) {
+          for (const child of node.children) {
+            if (updateVisibility(child, targetId)) return true;
+          }
+        }
+        return false;
+      };
+
+      updateVisibility(layoutToUpdate, determinedTargetNodeId);
+
+      return {
+        actionType,
+        targetNodeId: determinedTargetNodeId,
+        plannerInput,
+        directUpdateLayout: layoutToUpdate,
+        updatedDataContext: newDataContext,
+      };
+    }
+
+    // --- Data context update actions (no direct layout changes from router here) ---
+    if (
+      actionType === ActionType.UPDATE_DATA ||
+      actionType === ActionType.ADD_ITEM ||
+      actionType === ActionType.DELETE_ITEM ||
+      actionType === ActionType.SAVE_TASK_CHANGES
+    ) {
+      let targetPathOrId: string | undefined = determinedTargetNodeId;
+      if (actionType === ActionType.UPDATE_DATA) {
+        targetPathOrId = sourceNode?.bindings?.value as string || determinedTargetNodeId;
+      }
+      const newDataContext = executeAction(
+        actionType as string,
+        targetPathOrId,
+        finalEventPayload || {}, // Ensure payload is not null
+        dataContext
+      );
+      return {
+        actionType,
+        targetNodeId: determinedTargetNodeId,
+        plannerInput,
+        directUpdateLayout: null, 
+        updatedDataContext: newDataContext,
+      };
+    }
+
+    // --- LLM/planner for "big" actions (ensure no overlaps with above) ---
+    if (
+      actionType === ActionType.FULL_REFRESH ||
+      actionType === ActionType.UPDATE_NODE ||
+      actionType === ActionType.ADD_DROPDOWN ||
+      actionType === ActionType.TOGGLE_STATE || // Review if this can be a direct/data action
+      actionType === ActionType.UPDATE_FORM || // Review if this can be a direct/data action
+      actionType === ActionType.NAVIGATE || // Likely LLM or specific complex routing
+      actionType === ActionType.UPDATE_CONTEXT // Generic, might be LLM if complex change needed
+      // OPEN_DIALOG, CLOSE_DIALOG, HIDE_DETAIL, SHOW_DETAIL, HIDE_DIALOG are handled above
+    ) {
+      const layoutFromLLM = await callPlannerLLM(
+        plannerInput,
+        openaiApiKey || "",
+        {
+          actionType,
+          targetNodeId: determinedTargetNodeId,
+          plannerInput,
+        }
+      );
+      return {
+        actionType,
+        targetNodeId: determinedTargetNodeId,
+        plannerInput,
+        directUpdateLayout: layoutFromLLM,
+        updatedDataContext: dataContext,
+      };
+    }
+
+    // Fallback: This case might need rethinking.
+    // If no direct update or LLM call, what should it signify?
+    // Previously, it returned a prompt. Now, it should probably just indicate no specific layout update.
     return {
-      actionType,
-      targetNodeId: determinedTargetNodeId, // Return the consistently determined targetNodeId
+      actionType, // Or a specific ActionType.NO_OP if that exists and makes sense
+      targetNodeId: determinedTargetNodeId,
       plannerInput,
-      prompt: finalPrompt,
+      directUpdateLayout: null, // Explicitly null
+      updatedDataContext: dataContext,
     };
   }
 
