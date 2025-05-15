@@ -206,6 +206,14 @@ export function removeNodeById(tree: UISpecNode, nodeId: string): UISpecNode {
 export function uiReducer(state: UIState, action: UIAction): UIState {
   switch (action.type) {
     case "UI_EVENT": {
+      // Prevent duplicate INIT events
+      if (
+        action.event.type === "INIT" &&
+        state.history.some((e) => e.type === "INIT")
+      ) {
+        console.log("[AutoUI uiReducer] Ignoring duplicate INIT event");
+        return state; // Ignore duplicate INIT
+      }
       // Add the event to history and set loading state
       return {
         ...state,

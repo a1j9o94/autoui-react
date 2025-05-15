@@ -86,4 +86,32 @@ describe("uiReducer", () => {
 
     expect(state.loading).toBe(true);
   });
+
+  it("should ignore duplicate INIT events", () => {
+    const initEvent: UIEvent = {
+      type: "INIT",
+      nodeId: "system",
+      timestamp: Date.now(),
+      payload: null,
+    };
+
+    // Dispatch the first INIT event
+    let state = uiReducer(initialState, { type: "UI_EVENT", event: initEvent });
+
+    expect(state.loading).toBe(true);
+    expect(state.history).toHaveLength(1);
+    expect(state.history[0].type).toBe("INIT");
+
+    // Attempt to dispatch a second INIT event
+    const prevState = { ...state }; // Save previous state for comparison
+    state = uiReducer(state, { type: "UI_EVENT", event: initEvent });
+
+    // State should not have changed, and loading should not be re-triggered if it was already true
+    // and history should not have the second INIT event
+    expect(state.loading).toBe(prevState.loading); // loading state should remain as is from the first INIT
+    expect(state.history).toHaveLength(1);
+    expect(state.history[0].type).toBe("INIT"); // Still only one INIT event
+    expect(state.error).toBeNull();
+    expect(state).toEqual(prevState); // The entire state should be the same
+  });
 });

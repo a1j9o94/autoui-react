@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { UIEvent, UISpecNode, UIEventType, DataItem } from "./schema/ui";
 import { ActionType } from "./schema/action-types";
 import { useUIStateEngine, UseUIStateEngineOptions } from "./core/state";
@@ -187,6 +187,15 @@ export const AutoUI: React.FC<AutoUIProps> = ({
   enablePartialUpdates = true,
   openaiApiKey,
 }) => {
+  const stableGoal = React.useMemo(() => goal, [goal]);
+
+  // Memoize the schema prop to stabilize its reference if its content doesn't change.
+  // First, memoize the stringified version of the schema.
+  const schemaStringified = React.useMemo(() => JSON.stringify(schema), [schema]);
+  // Then, memoize the schema object itself, depending on the stringified version.
+  // stableSchemaProp will only get a new reference if the content of the schema prop changes.
+  const stableSchemaProp = React.useMemo(() => schema, [schemaStringified]);
+
   const [schemaAdapterInstance] = useState<SchemaAdapter | null>(null);
   const [dataContext, setDataContext] = useState<DataContext>({});
   const [componentsAvailable, setComponentsAvailable] = useState(true);
@@ -209,9 +218,9 @@ export const AutoUI: React.FC<AutoUIProps> = ({
     null
   );
 
-  // Restore effectiveSchema and scopedGoal definitions
-  const effectiveSchema = schema as Record<string, unknown>;
-  const scopedGoal = goal;
+  // Restore effectiveSchema and scopedGoal definitions using stable versions
+  const effectiveSchema = stableSchemaProp as Record<string, unknown>;
+  const scopedGoal = stableGoal;
 
   useEffect(() => {
     if (componentAdapter === "shadcn") {
