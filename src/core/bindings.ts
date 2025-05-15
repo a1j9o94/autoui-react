@@ -1,37 +1,11 @@
 import { UISpecNode, DataItem } from "../schema/ui";
 import { ActionType } from "../schema/action-types";
-import {
-  createSystemEvent,
-  systemEvents,
-  SystemEventType,
-} from "./system-events";
 
 /**
  * Interface for the runtime data context
  */
 export interface DataContext {
   [key: string]: unknown;
-}
-
-// Create a cache to prevent redundant resolving of the same node with same context
-// This helps prevent infinite loops
-// interface CacheKey { // Commented out as CacheKey is unused
-//   nodeId: string;
-//   contextHash: string;
-// }
-const bindingsCache = new Map<string, UISpecNode>();
-const MAX_CACHE_SIZE = 50;
-const CACHE_TTL = 2000; // 2 seconds
-const nodeCacheTimestamps = new Map<string, number>();
-
-// Simple hash function for data context objects to create cache keys
-function hashDataContext(context: DataContext): string {
-  return JSON.stringify(context);
-}
-
-// Create a cache key from node id and context
-function createCacheKey(nodeId: string, context: DataContext): string {
-  return `${nodeId}:${hashDataContext(context)}`;
 }
 
 /**
@@ -157,20 +131,20 @@ export function processBinding(
       const pathToResolve = pathInsideExact;
       let resolvedValue: unknown = undefined;
       // --- DEBUG LOGGING ---
-      console.log(
-        `[processBinding Debug] Processing EXACT template: "${binding}", Path: "${pathToResolve}", Has itemData: ${!!itemData}`
-      );
-      if (itemData) {
-        // Log itemData content for debugging
-        try {
-          console.log(
-            `[processBinding Debug] itemData content (EXACT):`,
-            JSON.parse(JSON.stringify(itemData))
-          );
-        } catch {
-          /* ignore logging error */
-        }
-      }
+      // console.log(
+      //   `[processBinding Debug] Processing EXACT template: "${binding}", Path: "${pathToResolve}", Has itemData: ${!!itemData}`
+      // );
+      // if (itemData) {
+      //   // Log itemData content for debugging
+      //   try {
+      //     console.log(
+      //       `[processBinding Debug] itemData content (EXACT):`,
+      //       JSON.parse(JSON.stringify(itemData))
+      //     );
+      //   } catch {
+      //     /* ignore logging error */
+      //   }
+      // }
       // --- DEBUG LOGGING END ---
 
       if (
@@ -197,20 +171,20 @@ export function processBinding(
       // Case 2: "Embedded Template" like "Name: {{item.name}}" or "{{item.name}} has {{item.id}}"
     } else if (binding.includes("{{") && binding.includes("}}")) {
       // --- DEBUG LOGGING ---
-      console.log(
-        `[processBinding Debug] Processing EMBEDDED templates: "${binding}", Has itemData: ${!!itemData}`
-      );
-      if (itemData) {
-        // Log itemData content for debugging
-        try {
-          console.log(
-            `[processBinding Debug] itemData content (EMBEDDED):`,
-            JSON.parse(JSON.stringify(itemData))
-          );
-        } catch {
-          /* ignore logging error */
-        }
-      }
+      // console.log(
+      //   `[processBinding Debug] Processing EMBEDDED templates: "${binding}", Has itemData: ${!!itemData}`
+      // );
+      // if (itemData) {
+      //   // Log itemData content for debugging
+      //   try {
+      //     console.log(
+      //       `[processBinding Debug] itemData content (EMBEDDED):`,
+      //       JSON.parse(JSON.stringify(itemData))
+      //     );
+      //   } catch {
+      //     /* ignore logging error */
+      //   }
+      // }
       // --- DEBUG LOGGING END ---
 
       const resolvedString = binding.replaceAll(
@@ -255,9 +229,9 @@ export function processBinding(
       const pathToResolve = binding;
       let resolvedValue: unknown = undefined;
       // --- DEBUG LOGGING ---
-      console.log(
-        `[processBinding Debug] Processing PATH string: "${pathToResolve}", Has itemData: ${!!itemData}`
-      );
+      // console.log(
+      //   `[processBinding Debug] Processing PATH string: "${pathToResolve}", Has itemData: ${!!itemData}`
+      // );
       // --- DEBUG LOGGING END ---
 
       // For path strings, prefer context unless itemData is explicitly targeted (e.g. via "item." prefix handled above)
@@ -310,103 +284,32 @@ export function processBinding(
 export async function resolveBindings(
   node: UISpecNode,
   context: DataContext,
-  itemData?: Record<string, unknown> // Added item context for list items
+  itemData?: DataItem | null
+  // ...
 ): Promise<UISpecNode> {
+  if (node.id === "task-detail") {
+    console.log(
+      `[resolveBindings task-detail SPECIFIC CHECK] Context for task-detail:`,
+      JSON.stringify(context)
+    );
+    console.log(
+      `[resolveBindings task-detail SPECIFIC CHECK] context.isTaskDetailDialogVisible = ${context.isTaskDetailDialogVisible}`
+    );
+    console.log(
+      `[resolveBindings task-detail SPECIFIC CHECK] context.selectedTask = ${JSON.stringify(
+        context.selectedTask
+      )}`
+    );
+  }
+
+  // Existing log:
   console.log(
     `[resolveBindings ENTRY] Node ID: ${node.id}, Type: ${
       node.node_type
     }, Has itemData: ${!!itemData}, Context keys: ${Object.keys(
-      context || {}
+      context || {} // Ensure context is not null before Object.keys
     ).join(", ")}`
   );
-
-  // Add this for task-detail before the bindings loop
-  if (node.id === "task-detail") {
-    console.log(
-      `[resolveBindings PRE-LOOP Debug] task-detail node.props:`,
-      JSON.stringify(node.props)
-    );
-    console.log(
-      `[resolveBindings PRE-LOOP Debug] task-detail node.bindings:`,
-      JSON.stringify(node.bindings)
-    );
-    console.log(
-      `[resolveBindings PRE-LOOP Debug] task-detail initial result.props.visible (from node.props):`,
-      (node.props ? node.props.visible : 'node.props is null')
-    );
-    console.log(
-      `[resolveBindings PRE-LOOP Debug] task-detail context.isTaskDetailDialogVisible:`,
-      context.isTaskDetailDialogVisible
-    );
-  }
-
-  // Determine the effective context for resolving this node's bindings
-  const effectiveContext = itemData ? { ...context, item: itemData } : context;
-
-  // Helper function to recursively make all child IDs within an instance unique
-  // Moved here to satisfy linter and define it once per resolveBindings call for a list parent
-  function makeChildIdsUniqueInInstance(
-    parentNode: UISpecNode,
-    baseInstanceId: string,
-    originalTemplateRootId: string
-  ) {
-    if (parentNode.children) {
-      parentNode.children = parentNode.children.map((child) => {
-        // Attempt to get the original ID part, removing any previously prefixed instance ID
-        let originalChildId = child.id;
-        // This check is a bit heuristic; assumes original IDs don't naturally contain the template root ID with a dash.
-        // A more robust way might involve storing original IDs separately if this becomes problematic.
-        if (child.id.startsWith(originalTemplateRootId + "-")) {
-          const parts = child.id.split("-");
-          if (parts.length > 1) {
-            // Takes the last part assuming it's the original specific ID part if multiple hyphens exist from prior processing
-            originalChildId = parts[parts.length - 1];
-          }
-        }
-
-        const newChildId = `${baseInstanceId}-${originalChildId}`;
-        const newChild = {
-          ...JSON.parse(JSON.stringify(child)), // Deep clone child
-          id: newChildId,
-        };
-        makeChildIdsUniqueInInstance(
-          newChild,
-          baseInstanceId,
-          originalTemplateRootId
-        ); // Recurse with the same baseInstanceId
-        return newChild;
-      });
-    }
-  }
-
-  // --- Cache Logic (using effective context) ---
-  const currentTime = Date.now();
-  const cacheKey = createCacheKey(node.id, effectiveContext);
-  const cachedNode = bindingsCache.get(cacheKey);
-  const cachedTimestamp = nodeCacheTimestamps.get(cacheKey);
-
-  if (
-    cachedNode &&
-    cachedTimestamp &&
-    currentTime - cachedTimestamp < CACHE_TTL
-  ) {
-    // Add this log for task-detail when returning from cache
-    if (node.id === "task-detail") {
-      console.log(
-        `[resolveBindings CACHE HIT Debug] task-detail returning cachedNode. Cached props.visible:`,
-        (cachedNode.props ? cachedNode.props.visible : 'cachedNode.props is null')
-      );
-    }
-    return cachedNode;
-  }
-
-  if (!itemData) {
-    await systemEvents.emit(
-      createSystemEvent(SystemEventType.BINDING_RESOLUTION_START, {
-        layout: node,
-      })
-    );
-  }
 
   const result: UISpecNode = {
     ...node,
@@ -433,7 +336,11 @@ export async function resolveBindings(
       if (!mergedProps) mergedProps = {}; // Ensure mergedProps is initialized here
 
       if (PROP_KEYS_TO_RESOLVE.has(key)) {
-        const resolvedPropValue = processBinding(value, context, itemData);
+        const resolvedPropValue = processBinding(
+          value,
+          context,
+          itemData ?? undefined
+        );
         if (resolvedPropValue !== undefined) {
           mergedProps[key] = resolvedPropValue;
         } else {
@@ -462,21 +369,17 @@ export async function resolveBindings(
 
   if (node.bindings) {
     for (const [key, bindingValue] of Object.entries(node.bindings)) {
-      // Add this log for task-detail INSIDE the loop
+      const resolvedValue = processBinding(
+        bindingValue,
+        context,
+        itemData ?? undefined
+      );
       if (node.id === "task-detail") {
+        // Log specifically for task-detail
         console.log(
-          `[resolveBindings IN-LOOP Debug] task-detail processing binding - Key: "${key}", Value:`,
-          bindingValue,
-          `Context.isTaskDetailDialogVisible: ${context.isTaskDetailDialogVisible}`
-        );
-      }
-
-      const resolvedValue = processBinding(bindingValue, context, itemData);
-
-      // Add this log for task-detail AFTER processBinding for the 'visible' key
-      if (node.id === "task-detail" && key === "visible") {
-        console.log(
-          `[resolveBindings IN-LOOP Debug] task-detail 'visible' binding resolved to:`,
+          `[resolveBindings - ${node.id}] Binding for '${key}': '${String(
+            bindingValue
+          )}' -> Resolved:`,
           resolvedValue
         );
       }
@@ -484,12 +387,20 @@ export async function resolveBindings(
       if (resolvedValue !== undefined) {
         if (!result.props) result.props = {};
         result.props[key] = resolvedValue;
-
-        // Add this log for task-detail AFTER setting result.props[key] for 'visible'
-        if (node.id === "task-detail" && key === "visible") {
+        if (node.id === "task-detail") {
+          // Log specifically for task-detail
           console.log(
-            `[resolveBindings IN-LOOP Debug] task-detail result.props.visible is NOW:`,
-            result.props.visible
+            `[resolveBindings - ${node.id}] Set result.props.${key} =`,
+            resolvedValue
+          );
+        }
+      } else {
+        if (node.id === "task-detail") {
+          // Log specifically for task-detail
+          console.log(
+            `[resolveBindings - ${node.id}] Binding for '${key}' ('${String(
+              bindingValue
+            )}') resolved to undefined. Not setting prop.`
           );
         }
       }
@@ -504,10 +415,11 @@ export async function resolveBindings(
       processedEvents[eventType] = {
         ...eventConfig,
         payload: eventConfig.payload
-          ? (processBinding(eventConfig.payload, context, itemData) as Record<
-              string,
-              unknown
-            > | null)
+          ? (processBinding(
+              eventConfig.payload,
+              context,
+              itemData ?? undefined
+            ) as Record<string, unknown> | null)
           : null,
       };
     }
@@ -518,36 +430,36 @@ export async function resolveBindings(
 
   const dataBindingValue = result.props?.data ?? result.props?.items;
 
-  // Add detailed logs before the ListView processing condition
-  if (node.id === "task-list") {
-    // Log only for the specific ListView we are interested in
-    console.log(
-      `[resolveBindings Debug] Checking node ${node.id} (${node.node_type}) for ListView processing eligibility:`
-    );
-    console.log(
-      `[resolveBindings Debug]   Is ListView or Table type: ${
-        node.node_type === "ListView" || node.node_type === "Table"
-      }`
-    );
-    console.log(
-      `[resolveBindings Debug]   Is dataBindingValue an array: ${Array.isArray(
-        dataBindingValue
-      )}`
-    );
-    if (Array.isArray(dataBindingValue)) {
-      console.log(
-        `[resolveBindings Debug]     dataBindingValue length: ${dataBindingValue.length}`
-      );
-    }
-    console.log(
-      `[resolveBindings Debug]   Original node.children (template) exists: ${!!node.children}`
-    );
-    if (node.children) {
-      console.log(
-        `[resolveBindings Debug]     Original node.children.length (template count): ${node.children.length}`
-      );
-    }
-  }
+  // // Add detailed logs before the ListView processing condition
+  // if (node.id === "task-list") {
+  //   // Log only for the specific ListView we are interested in
+  //   console.log(
+  //     `[resolveBindings Debug] Checking node ${node.id} (${node.node_type}) for ListView processing eligibility:`
+  //   );
+  //   console.log(
+  //     `[resolveBindings Debug]   Is ListView or Table type: ${
+  //       node.node_type === "ListView" || node.node_type === "Table"
+  //     }`
+  //   );
+  //   console.log(
+  //     `[resolveBindings Debug]   Is dataBindingValue an array: ${Array.isArray(
+  //       dataBindingValue
+  //     )}`
+  //   );
+  //   if (Array.isArray(dataBindingValue)) {
+  //     console.log(
+  //       `[resolveBindings Debug]     dataBindingValue length: ${dataBindingValue.length}`
+  //     );
+  //   }
+  //   console.log(
+  //     `[resolveBindings Debug]   Original node.children (template) exists: ${!!node.children}`
+  //   );
+  //   if (node.children) {
+  //     console.log(
+  //       `[resolveBindings Debug]     Original node.children.length (template count): ${node.children.length}`
+  //     );
+  //   }
+  // }
 
   if (
     (node.node_type === "ListView" || node.node_type === "Table") &&
@@ -555,11 +467,11 @@ export async function resolveBindings(
     node.children &&
     node.children.length > 0
   ) {
-    if (node.id === "task-list") {
-      console.log(
-        `[resolveBindings Debug] ENTERED ListView processing for ${node.id}`
-      );
-    }
+    // if (node.id === "task-list") {
+    //   console.log(
+    //     `[resolveBindings Debug] ENTERED ListView processing for ${node.id}`
+    //   );
+    // }
 
     // Check if the children are already instantiated items or a template
     // A simple heuristic: if the first child's ID does not strictly match the template ID we expect.
@@ -570,9 +482,9 @@ export async function resolveBindings(
       (node.children.length === 1 && templateChild.id !== "taskItem-template");
 
     if (isAlreadyExpanded && node.id === "task-list") {
-      console.log(
-        `[resolveBindings Debug] ListView ${node.id} appears to be already expanded. Re-resolving its existing children.`
-      );
+      // console.log(
+      //   `[resolveBindings Debug] ListView ${node.id} appears to be already expanded. Re-resolving its existing children.`
+      // );
       // If already expanded, just re-resolve bindings on existing children
       // This might happen if the parent re-renders and passes the already processed ListView node.
       result.children = await Promise.all(
@@ -583,11 +495,11 @@ export async function resolveBindings(
       );
     } else {
       // Standard expansion logic using templateChild
-      if (node.id === "task-list") {
-        console.log(
-          `[resolveBindings Debug] ListView ${node.id} is using template: ${templateChild.id}`
-        );
-      }
+      // if (node.id === "task-list") {
+      //   console.log(
+      //     `[resolveBindings Debug] ListView ${node.id} is using template: ${templateChild.id}`
+      //   );
+      // }
       const mappedChildren = await Promise.all(
         dataBindingValue.map(async (currentItemData, index) => {
           try {
@@ -644,10 +556,10 @@ export async function resolveBindings(
           }
         })
       );
-      console.log(
-        `[resolveBindings Debug] ListView ${node.id} - mappedChildren:`,
-        JSON.stringify(mappedChildren, null, 2)
-      );
+      // console.log(
+      //   `[resolveBindings Debug] ListView ${node.id} - mappedChildren:`,
+      //   JSON.stringify(mappedChildren, null, 2)
+      // );
       result.children = mappedChildren.filter(
         (child) => child !== null
       ) as UISpecNode[];
@@ -660,44 +572,17 @@ export async function resolveBindings(
     result.children = [];
   }
 
-  if (!itemData) {
-    await systemEvents.emit(
-      createSystemEvent(SystemEventType.BINDING_RESOLUTION_COMPLETE, {
-        originalLayout: node,
-        resolvedLayout: result,
-      })
-    );
-  }
-
-  // Add this for task-detail just before returning
-  if (node.id === "task-detail") {
-    console.log(
-      `[resolveBindings RETURN Debug] task-detail final result.props:`,
-      JSON.stringify(result.props)
-    );
-    console.log(
-      `[resolveBindings RETURN Debug] task-detail final result.bindings:`,
-      JSON.stringify(result.bindings)
-    );
-  }
-
-  bindingsCache.set(cacheKey, result);
-  nodeCacheTimestamps.set(cacheKey, currentTime);
-
-  if (bindingsCache.size > MAX_CACHE_SIZE) {
-    let oldestKey: string | null = null;
-    let oldestTimestamp = currentTime;
-    for (const [key, timestamp] of nodeCacheTimestamps.entries()) {
-      if (timestamp < oldestTimestamp) {
-        oldestTimestamp = timestamp;
-        oldestKey = key;
-      }
-    }
-    if (oldestKey) {
-      bindingsCache.delete(oldestKey);
-      nodeCacheTimestamps.delete(oldestKey);
-    }
-  }
+  // // Add this for task-detail just before returning
+  // if (node.id === "task-detail") {
+  //   console.log(
+  //     `[resolveBindings RETURN Debug] task-detail final result.props:`,
+  //     JSON.stringify(result.props)
+  //   );
+  //   console.log(
+  //     `[resolveBindings RETURN Debug] task-detail final result.bindings:`,
+  //     JSON.stringify(result.bindings)
+  //   );
+  // }
 
   return result;
 }
@@ -717,34 +602,19 @@ export function executeAction(
   payload?: Record<string, unknown>,
   context: DataContext = {}
 ): DataContext {
-  console.log(
-    `[executeAction ENTRY] Received action string: "${action}" (type: ${typeof action}), Target: ${target}`
-  );
-  console.log(
-    `[executeAction ENTRY] Comparing with ActionType.SHOW_DETAIL (enum): "${ActionType.SHOW_DETAIL}"`
-  );
-  console.log(
-    `[executeAction ENTRY] Comparing with ActionType.HIDE_DIALOG (enum): "${ActionType.HIDE_DIALOG}"`
-  );
+  // console.log(
+  //   `[executeAction ENTRY] Received action string: "${action}" (type: ${typeof action}), Target: ${target}`
+  // );
+  // console.log(
+  //   `[executeAction ENTRY] Comparing with ActionType.SHOW_DETAIL (enum): "${ActionType.SHOW_DETAIL}"`
+  // );
+  // console.log(
+  //   `[executeAction ENTRY] Comparing with ActionType.HIDE_DIALOG (enum): "${ActionType.HIDE_DIALOG}"`
+  // );
 
   let newContext = { ...context };
 
   switch (action as ActionType | string) {
-    // Remove the string-literal "VIEW_DETAIL" case if it's not actively used
-    // or if its functionality is covered by ActionType.SHOW_DETAIL
-    /*
-    case "VIEW_DETAIL": { 
-      if (payload?.item) {
-        newContext = setValueByPath(newContext, "selected", payload.item);
-      } else {
-        console.warn(
-          `[executeAction] VIEW_DETAIL action requires payload with item property.`
-        );
-      }
-      break;
-    }
-    */
-
     case ActionType.SHOW_DETAIL: {
       const taskId = payload?.taskId as string | undefined;
       const dialogNodeId = target;
@@ -757,10 +627,10 @@ export function executeAction(
           );
           if (foundTask) {
             newContext = setValueByPath(newContext, "selectedTask", foundTask);
-            console.log(
-              `[executeAction] ${ActionType.SHOW_DETAIL}: Set selectedTask to:`,
-              foundTask
-            );
+            // console.log(
+            //   `[executeAction] ${ActionType.SHOW_DETAIL}: Set selectedTask to:`,
+            //   foundTask
+            // );
           } else {
             console.warn(
               `[executeAction] ${ActionType.SHOW_DETAIL}: Task with id "${taskId}" not found in tasks.data.`
@@ -786,10 +656,10 @@ export function executeAction(
         "isTaskDetailDialogVisible",
         true
       );
-      console.log(
-        `[executeAction] ${ActionType.SHOW_DETAIL}: set isTaskDetailDialogVisible to true. Dialog target: ${dialogNodeId}, Payload:`,
-        payload
-      );
+      // console.log(
+      //   `[executeAction] ${ActionType.SHOW_DETAIL}: set isTaskDetailDialogVisible to true. Dialog target: ${dialogNodeId}, Payload:`,
+      //   payload
+      // );
       break;
     }
 
@@ -800,18 +670,18 @@ export function executeAction(
         "isTaskDetailDialogVisible",
         false
       );
-      console.log(
-        `[executeAction] ${ActionType.HIDE_DIALOG}: set isTaskDetailDialogVisible to false.`
-      );
+      // console.log(
+      //   `[executeAction] ${ActionType.HIDE_DIALOG}: set isTaskDetailDialogVisible to false.`
+      // );
       break;
     }
 
     case ActionType.HIDE_DETAIL: {
       newContext = setValueByPath(newContext, "selectedItemForDetail", null); // Example general detail item
       newContext = setValueByPath(newContext, "isDetailViewOpen", false); // Example general detail flag
-      console.log(
-        `[executeAction] ${ActionType.HIDE_DETAIL}: Detail view hidden.`
-      );
+      // console.log(
+      //   `[executeAction] ${ActionType.HIDE_DETAIL}: Detail view hidden.`
+      // );
       break;
     }
 
@@ -827,11 +697,11 @@ export function executeAction(
         );
         // If a specific item should be loaded, SHOW_DETAIL with taskId is more appropriate.
         // OPEN_DIALOG might just make a generic, perhaps empty, dialog visible.
-        console.log(
-          `[executeAction] ${ActionType.OPEN_DIALOG}: Dialog ${
-            dialogId || "taskDetailDialogNodeId"
-          } opened (isTaskDetailDialogVisible: true).`
-        );
+        // console.log(
+        //   `[executeAction] ${ActionType.OPEN_DIALOG}: Dialog ${
+        //     dialogId || "taskDetailDialogNodeId"
+        //   } opened (isTaskDetailDialogVisible: true).`
+        // );
       } else {
         // Logic for other dialogs if their visibility is controlled by different flags
         console.warn(
@@ -850,11 +720,11 @@ export function executeAction(
           false
         );
         newContext = setValueByPath(newContext, "selectedTask", null); // Clear task for this specific dialog
-        console.log(
-          `[executeAction] ${ActionType.CLOSE_DIALOG}: Dialog ${
-            dialogId || "taskDetailDialogNodeId"
-          } closed and selectedTask cleared.`
-        );
+        // console.log(
+        //   `[executeAction] ${ActionType.CLOSE_DIALOG}: Dialog ${
+        //     dialogId || "taskDetailDialogNodeId"
+        //   } closed and selectedTask cleared.`
+        // );
       } else {
         // Logic for other dialogs
         console.warn(
@@ -865,13 +735,13 @@ export function executeAction(
     }
 
     case ActionType.UPDATE_DATA: {
-      console.log(
-        "[executeAction UPDATE_DATA] Context BEFORE setValueByPath:",
-        JSON.stringify(context, null, 2)
-      );
-      console.log(
-        `[executeAction UPDATE_DATA] Target path: ${target}, Payload value: ${payload?.value}`
-      );
+      // console.log(
+      //   "[executeAction UPDATE_DATA] Context BEFORE setValueByPath:",
+      //   JSON.stringify(context, null, 2)
+      // );
+      // console.log(
+      //   `[executeAction UPDATE_DATA] Target path: ${target}, Payload value: ${payload?.value}`
+      // );
       let updatedContext = context; // Start with the passed context
       if (target && payload && "value" in payload) {
         updatedContext = setValueByPath(context, target, payload.value); // Use original context as base for setValueByPath
@@ -881,10 +751,10 @@ export function executeAction(
         );
         // newContext will remain a clone of the original context if conditions aren't met
       }
-      console.log(
-        "[executeAction UPDATE_DATA] Context AFTER setValueByPath (assigned to newContext):",
-        JSON.stringify(updatedContext, null, 2)
-      );
+      // console.log(
+      //   "[executeAction UPDATE_DATA] Context AFTER setValueByPath (assigned to newContext):",
+      //   JSON.stringify(updatedContext, null, 2)
+      // );
       newContext = updatedContext; // Assign the result to newContext which is returned by the function
       break;
     }
@@ -995,9 +865,9 @@ export function executeAction(
           "isTaskDetailDialogVisible",
           false
         ); // Hide dialog
-        console.log(
-          `[executeAction] SAVE_TASK_CHANGES: Updated task ${taskIdToSave} and hid dialog.`
-        );
+        // console.log(
+        //   `[executeAction] SAVE_TASK_CHANGES: Updated task ${taskIdToSave} and hid dialog.`
+        // );
       } else {
         console.warn(
           "[executeAction] SAVE_TASK_CHANGES: Could not save. Task list, selected task, or ID mismatch.",
@@ -1016,4 +886,40 @@ export function executeAction(
   }
 
   return newContext;
+}
+
+// Helper function to recursively make all child IDs within an instance unique
+// Moved here to satisfy linter and define it once per resolveBindings call for a list parent
+function makeChildIdsUniqueInInstance(
+  parentNode: UISpecNode,
+  baseInstanceId: string,
+  originalTemplateRootId: string
+) {
+  if (parentNode.children) {
+    parentNode.children = parentNode.children.map((child) => {
+      // Attempt to get the original ID part, removing any previously prefixed instance ID
+      let originalChildId = child.id;
+      // This check is a bit heuristic; assumes original IDs don't naturally contain the template root ID with a dash.
+      // A more robust way might involve storing original IDs separately if this becomes problematic.
+      if (child.id.startsWith(originalTemplateRootId + "-")) {
+        const parts = child.id.split("-");
+        if (parts.length > 1) {
+          // Takes the last part assuming it's the original specific ID part if multiple hyphens exist from prior processing
+          originalChildId = parts[parts.length - 1];
+        }
+      }
+
+      const newChildId = `${baseInstanceId}-${originalChildId}`;
+      const newChild = {
+        ...JSON.parse(JSON.stringify(child)), // Deep clone child
+        id: newChildId,
+      };
+      makeChildIdsUniqueInInstance(
+        newChild,
+        baseInstanceId,
+        originalTemplateRootId
+      ); // Recurse with the same baseInstanceId
+      return newChild;
+    });
+  }
 }

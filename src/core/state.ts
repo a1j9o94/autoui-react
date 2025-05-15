@@ -1,33 +1,22 @@
 import { useReducer, useCallback, useEffect, useRef } from "react";
-// Mock useChat hook for development
-// const useChat = (config: any) => { ... };
 
-import { UIEvent, UISpecNode, PlannerInput, UIState } from "../schema/ui";
+import { UIEvent, UISpecNode, UIState } from "../schema/ui";
 import { uiReducer, initialState } from "./reducer";
-import { mockPlanner, callPlannerLLM } from "./planner"; // Added callPlannerLLM
 import {
   systemEvents,
   createSystemEvent,
   SystemEventType,
 } from "./system-events";
-import { ActionRouter } from "./action-router";
+import { ActionRouter, PlanningConfig } from "./action-router";
 import { ActionType } from "../schema/action-types";
 import { DataContext } from "./bindings"; // Import DataContext
 
 export interface UseUIStateEngineOptions {
   schema: Record<string, unknown>;
   goal: string;
-  openaiApiKey?: string | undefined;
+  openaiApiKey: string;
   userContext?: Record<string, unknown> | undefined;
-  mockMode?: boolean | undefined;
-  planningConfig?:
-    | {
-        prefetchDepth?: number;
-        temperature?: number;
-        streaming?: boolean;
-      }
-    | undefined;
-  router?: ActionRouter | undefined;
+  planningConfig?: PlanningConfig | undefined;
   dataContext?: Record<string, unknown> | undefined;
   enablePartialUpdates?: boolean | undefined;
 }
@@ -40,14 +29,11 @@ export interface UseUIStateEngineOptions {
 export function useUIStateEngine({
   schema,
   goal,
-  openaiApiKey,
+  openaiApiKey = "",
   userContext,
-  mockMode = false,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   planningConfig,
-  router = new ActionRouter(),
   dataContext = {},
-  enablePartialUpdates = false,
+  enablePartialUpdates = true,
 }: UseUIStateEngineOptions) {
   // Warn if userContext is explicitly null, as it's an edge case we want to discourage.
   // Consumers should use undefined if they mean to omit it.
@@ -60,6 +46,7 @@ export function useUIStateEngine({
 
   const [state, dispatch] = useReducer(uiReducer, initialState);
   const stateRef = useRef<UIState>(state); // Ref to hold the current state
+  const router = new ActionRouter(openaiApiKey, planningConfig);
 
   useEffect(() => {
     stateRef.current = state; // Keep the ref updated with the latest state
@@ -105,6 +92,7 @@ export function useUIStateEngine({
           layoutForRouting,
           contextForRouting,
           goal,
+          openaiApiKey,
           userContext
         );
 
@@ -127,51 +115,16 @@ export function useUIStateEngine({
             });
           }
 
-          systemEvents.emit(
-            createSystemEvent(SystemEventType.PLAN_START, {
-              plannerInput: route.plannerInput,
-            })
-          );
-
-          if (mockMode) {
-            // Use directUpdateLayout if present, otherwise fallback to mockPlanner
-            if (route.directUpdateLayout) {
-              resolvedNode = route.directUpdateLayout;
-            } else {
-              resolvedNode = mockPlanner(
-                route.plannerInput,
-                route.targetNodeId
-              );
-            }
-          } else {
-            // Use directUpdateLayout if present, otherwise call LLM
-            if (route.directUpdateLayout) {
-              resolvedNode = route.directUpdateLayout;
-            } else {
-              resolvedNode = await callPlannerLLM(
-                route.plannerInput,
-                openaiApiKey || "",
-                route
-              );
-            }
-          }
-        } else {
-          // Fallback: should not happen if router always returns a route
-          const input: PlannerInput = {
-            schema,
-            goal,
-            history: [...stateRef.current.history, event],
-            userContext,
-          };
-          if (mockMode) {
-            resolvedNode = mockPlanner(input);
-          } else {
-            resolvedNode = await callPlannerLLM(
-              input,
-              openaiApiKey || "",
-              undefined
+          // Use directUpdateLayout if present, otherwise call LLM
+          if (!route.updatedNode) {
+            throw new Error(
+              "No updatedNode returned from router.resolveRoute. This should not happen."
             );
           }
+
+          resolvedNode = route.updatedNode;
+        } else {
+          throw new Error("No route returned from router.resolveRoute");
         }
 
         // Dispatch based on action type (derived from routing or default)
@@ -202,8 +155,8 @@ export function useUIStateEngine({
           default:
             dispatch({ type: "AI_RESPONSE", node: resolvedNode });
             break;
+          // systemEvents.emit for PLAN_COMPLETE is handled by callPlannerLLM or should be added for mockPlanner path
         }
-        // systemEvents.emit for PLAN_COMPLETE is handled by callPlannerLLM or should be added for mockPlanner path
       } catch (e) {
         const errorMessage = e instanceof Error ? e.message : String(e);
         dispatch({ type: "ERROR", message: errorMessage });
@@ -220,8 +173,6 @@ export function useUIStateEngine({
       goal,
       schema,
       userContext,
-      router,
-      mockMode,
       dataContext,
       openaiApiKey,
       enablePartialUpdates,
@@ -229,73 +180,52 @@ export function useUIStateEngine({
     ]
   );
 
-  // Effect to process LLM responses - REMOVE THIS ENTIRE useEffect
-  // useEffect(() => { ... }, [data.content, error, isLoading, enablePartialUpdates]);
-
   // Initial query on mount
   useEffect(() => {
     const initialFetch = async () => {
       dispatch({ type: "LOADING", isLoading: true });
       try {
-        const input: PlannerInput = {
-          schema,
-          goal,
-          history: [], // Initial history is empty
-          userContext: userContext,
+        const initEvent: UIEvent = {
+          type: "INIT",
+          nodeId: "system",
+          timestamp: Date.now(),
+          payload: null,
         };
-        let node: UISpecNode;
 
-        if (mockMode) {
-          node = mockPlanner(input);
-        } else {
-          const initEvent: UIEvent = {
-            type: "INIT",
-            nodeId: "system",
-            timestamp: Date.now(),
-            payload: null,
-          };
+        const route = await router.resolveRoute(
+          initEvent,
+          schema,
+          stateRef.current.layout,
+          dataContext,
+          goal,
+          openaiApiKey,
+          userContext
+        );
 
-          const route = await router.resolveRoute(
-            initEvent,
-            schema,
-            stateRef.current.layout,
-            dataContext,
-            goal,
-            userContext
+        if (!route) {
+          console.error(
+            "[UIStateEngine] Initial fetch: Failed to resolve route for INIT event."
           );
-
-          if (!route) {
-            console.error(
-              "[UIStateEngine] Initial fetch: Failed to resolve route for INIT event."
-            );
-            throw new Error("Failed to initialize UI due to routing error.");
-          }
-
-          // If router provided an updated data context on initial load, set it.
-          // This is less common for INIT but good practice.
-          if (route.updatedDataContext) {
-            dispatch({
-              type: "SET_DATA_CONTEXT",
-              payload: route.updatedDataContext,
-            });
-          }
-
-          systemEvents.emit(
-            createSystemEvent(SystemEventType.PLAN_START, {
-              plannerInput: route.plannerInput,
-            })
-          );
-
-          if (route.directUpdateLayout) {
-            node = route.directUpdateLayout;
-          } else {
-            node = await callPlannerLLM(
-              route.plannerInput,
-              openaiApiKey || "",
-              route
-            );
-          }
+          throw new Error("Failed to initialize UI due to routing error.");
         }
+
+        // If router provided an updated data context on initial load, set it.
+        // This is less common for INIT but good practice.
+        if (route.updatedDataContext) {
+          dispatch({
+            type: "SET_DATA_CONTEXT",
+            payload: route.updatedDataContext,
+          });
+        }
+
+        if (!route.updatedNode) {
+          throw new Error(
+            "No updatedNode returned from router.resolveRoute on initial fetch. This should not happen."
+          );
+        }
+
+        const node = route.updatedNode;
+
         dispatch({ type: "AI_RESPONSE", node });
       } catch (e) {
         const errorMessage = e instanceof Error ? e.message : String(e);

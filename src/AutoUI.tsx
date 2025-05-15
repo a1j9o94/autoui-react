@@ -21,6 +21,7 @@ import {
   getMissingComponentsMessage,
 } from "./core/component-detection";
 import "./styles/autoui.css";
+import { PlanningConfig } from "./core/action-router";
 
 // Helper function to correct list bindings
 function correctListBindingsRecursive(
@@ -148,17 +149,10 @@ export interface AutoUIProps
   databaseConfig?: Record<string, unknown>;
 
   // Planning configuration
-  planningConfig?: {
-    // Future planning depth (for v0.2)
-    prefetchDepth?: number;
-    // Custom temperature for the LLM (0.0 - 1.0)
-    temperature?: number;
-    // Whether to use streaming (otherwise wait for complete response)
-    streaming?: boolean;
-  };
+  planningConfig?: PlanningConfig;
 
   // Add the openaiApiKey prop here
-  openaiApiKey?: string;
+  openaiApiKey: string;
 }
 
 /**
@@ -188,17 +182,15 @@ export const AutoUI: React.FC<AutoUIProps> = ({
   eventHooks,
   systemEventHooks,
   debugMode = false,
-  mockMode = false,
   planningConfig,
   integration = {},
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  scope = {},
   enablePartialUpdates = true,
   openaiApiKey,
 }) => {
   const [schemaAdapterInstance] = useState<SchemaAdapter | null>(null);
   const [dataContext, setDataContext] = useState<DataContext>({});
   const [componentsAvailable, setComponentsAvailable] = useState(true);
+
   const [uiStatus, setUiStatus] = useState<
     | "idle"
     | "initializing"
@@ -207,10 +199,12 @@ export const AutoUI: React.FC<AutoUIProps> = ({
     | "event_processing"
     | "error"
   >("initializing");
-  const [resolvedLayout, setResolvedLayout] = useState<UISpecNode | undefined>(
-    undefined
-  );
-  const resolvedLayoutRef = useRef<UISpecNode | undefined | null>(null);
+
+  const [currentResolvedLayoutForRender, setCurrentResolvedLayoutForRender] =
+    useState<UISpecNode | null>(null);
+  const [isResolvingBindings, setIsResolvingBindings] =
+    useState<boolean>(false);
+
   const [renderedNode, setRenderedNode] = useState<React.ReactElement | null>(
     null
   );
@@ -286,10 +280,8 @@ export const AutoUI: React.FC<AutoUIProps> = ({
     schema: effectiveSchema,
     goal: scopedGoal,
     userContext,
-    mockMode,
     planningConfig,
-    router: undefined,
-    dataContext,
+    dataContext, // Pass the local dataContext here, engine will use it if its own is empty initially
     enablePartialUpdates,
     openaiApiKey,
   });
@@ -332,7 +324,8 @@ export const AutoUI: React.FC<AutoUIProps> = ({
   const processEvent = useCallback(
     async (event: UIEvent) => {
       setUiStatus("event_processing");
-      const currentLayoutViaRef = resolvedLayoutRef.current;
+      // Use currentResolvedLayoutForRender as the layout active when the event occurred
+      const layoutAtEventTime = currentResolvedLayoutForRender;
 
       const shouldProceed = await eventManagerRef.current.processEvent(event);
       if (onEvent) onEvent(event);
@@ -346,56 +339,64 @@ export const AutoUI: React.FC<AutoUIProps> = ({
         return;
       }
 
-      // --- Attempt at targeted cache invalidation for task-detail ---
-      if (event.type === "CLICK" && currentLayoutViaRef && event.nodeId.includes("view-details-button")) {
-        // Heuristic: if a view-details-button is clicked.
-        // More robust would be to check the actual event config if readily available.
-        // For this specific known issue with task-detail:
-        const mainContent = currentLayoutViaRef.children?.find(c => c.id === "main-content");
-        const taskList = mainContent?.children?.find(c => c.id === "tasks-container")?.children?.find(c => c.id === "task-list");
-        const eventSourceListItemCard = taskList?.children?.find(item => item.children?.some(btn => btn.id === event.nodeId));
-        const buttonNode = eventSourceListItemCard?.children?.find(btn => btn.id === event.nodeId);
+      if (
+        event.type === "CLICK" &&
+        layoutAtEventTime &&
+        event.nodeId.includes("view-details-button")
+      ) {
+        const mainContent = layoutAtEventTime.children?.find(
+          (c) => c.id === "main-content"
+        );
+        const taskList = mainContent?.children
+          ?.find((c) => c.id === "tasks-container")
+          ?.children?.find((c) => c.id === "task-list");
+        const eventSourceListItemCard = taskList?.children?.find((item) =>
+          item.children?.some((btn) => btn.id === event.nodeId)
+        );
+        const buttonNode = eventSourceListItemCard?.children?.find(
+          (btn) => btn.id === event.nodeId
+        );
 
-        if (buttonNode?.events?.CLICK?.action === ActionType.SHOW_DETAIL && 
-            buttonNode?.events?.CLICK?.target === "task-detail") {
-          
-          // Construct the simplified key for the typical "hidden" state of task-detail
-          // Key format from renderer: `${node.id}:${node.props?.visible}:${(node.props?.data as {id?: string|number})?.id || 'no-data-selected'}`
+        if (
+          buttonNode?.events?.CLICK?.action === ActionType.SHOW_DETAIL &&
+          buttonNode?.events?.CLICK?.target === "task-detail"
+        ) {
           const cacheKeyToClear = `task-detail:false:no-data-selected`;
           clearRenderedNodeCacheEntry(cacheKeyToClear);
-          console.log(`[AutoUI.processEvent] Attempted to clear cache for task-detail using simplified key: ${cacheKeyToClear}`);
+          console.log(
+            `[AutoUI.processEvent] Attempted to clear cache for task-detail using simplified key: ${cacheKeyToClear}`
+          );
         }
       }
 
-      // Log the event object being passed to the engine
       console.log(
         "[AutoUI.processEvent] Forwarding event to engine:",
         JSON.stringify(event, null, 2)
       );
       console.log(
-        "[AutoUI.processEvent] Passing currentLayout ID:",
-        currentLayoutViaRef?.id
+        "[AutoUI.processEvent] Passing currentLayout ID (at event time):",
+        layoutAtEventTime?.id
       );
       console.log(
         "[AutoUI.processEvent] Passing dataContext keys to engine:",
         Object.keys(dataContext)
       );
 
-      // AutoUI no longer calls executeAction directly or setDataContext here.
-      // It passes its current dataContext to the engine.
-      // The engine, via the router, will call executeAction and return updatedDataContext,
-      // which AutoUI will then pick up via its useEffect on state.dataContext.
-      handleEvent(event, currentLayoutViaRef, dataContext);
+      // Pass layoutAtEventTime and the current dataContext to the engine.
+      // The engine will use layoutAtEventTime to find the event source node.
+      handleEvent(event, layoutAtEventTime, dataContext);
 
       // uiStatus will be managed by other effects based on state changes from the engine
+      // No longer setting uiStatus to 'idle' here directly.
     },
     [
       dataContext,
       handleEvent,
       onEvent,
       eventManagerRef,
-      resolvedLayoutRef,
-      setUiStatus,
+      currentResolvedLayoutForRender,
+      // state.layout, // No longer directly using state.layout here for this callback's logic concerning handleEvent's second arg
+      // setUiStatus is implicitly available
     ]
   );
 
@@ -414,107 +415,154 @@ export const AutoUI: React.FC<AutoUIProps> = ({
     }
   }, [state.dataContext, dataContext]);
 
-  const resolveLayoutBindings = useCallback(async () => {
-    // Ensure dataContext is populated beyond just an empty object or initial user prop
-    const hasMeaningfulDataContext =
-      dataContext &&
-      Object.keys(dataContext).some(
-        (key) =>
-          key !== "user" ||
-          Object.keys(dataContext["user"] as object).length > 0
-      );
-
-    if (state.layout && hasMeaningfulDataContext) {
-      console.log(
-        `[AutoUI resolveLayoutBindings] Calling core resolveBindings for layout ID: ${state.layout.id}. DataContext being used: ${JSON.stringify(Object.keys(dataContext))}, isTaskDetailDialogVisible: ${dataContext.isTaskDetailDialogVisible}`
-      );
-      setUiStatus("resolving_bindings");
-      try {
-        const correctedLayout = correctListBindingsRecursive(
-          state.layout,
-          dataContext
-        );
-        const resolved = await resolveBindings(correctedLayout, dataContext);
-        setResolvedLayout(resolved);
-        resolvedLayoutRef.current = resolved;
-      } catch (err) {
-        console.error("Error resolving bindings:", err);
-        setUiStatus("error");
-      }
-    } else {
-      if (!state.layout)
-        console.log(
-          "[AutoUI] Skipping resolveBindings: state.layout is null/undefined"
-        );
-      if (!hasMeaningfulDataContext)
-        console.log(
-          "[AutoUI] Skipping resolveBindings: dataContext is not meaningfully populated yet"
-        );
-      setResolvedLayout(undefined);
-      resolvedLayoutRef.current = undefined;
-      if (!state.loading && uiStatus !== "initializing") setUiStatus("idle");
-    }
-  }, [state.layout, dataContext]);
-
+  // Effect to resolve bindings when state.layout or local dataContext changes
   useEffect(() => {
-    resolveLayoutBindings();
-  }, [resolveLayoutBindings]);
+    const resolveAndSetLayout = async () => {
+      const hasMeaningfulDataContext =
+        dataContext &&
+        Object.keys(dataContext).some(
+          (key) =>
+            key !== "user" ||
+            Object.keys(dataContext["user"] as object).length > 0
+        );
 
-  const renderResolvedLayout = useCallback(async () => {
-    if (resolvedLayout) {
-      setUiStatus("rendering");
-      console.log(
-        "[AutoUI Debug] Rendering with resolvedLayout:",
-        JSON.stringify(resolvedLayout, null, 2)
-      );
-      try {
-        systemEvents.emit(
-          createSystemEvent(SystemEventType.RENDER_START, {
-            layout: resolvedLayout,
-          })
+      if (state.layout && hasMeaningfulDataContext) {
+        console.log(
+          `[AutoUI resolveAndSetLayout] Calling core resolveBindings for layout ID: ${
+            state.layout.id
+          }. DataContext keys: ${Object.keys(dataContext).join(", ")}`
         );
-        const rendered = await renderNode(
-          resolvedLayout,
-          componentAdapter as "shadcn",
-          processEvent
+        setIsResolvingBindings(true);
+        setUiStatus("resolving_bindings");
+        try {
+          const correctedLayout = correctListBindingsRecursive(
+            state.layout,
+            dataContext
+          );
+
+          systemEvents.emit(
+            createSystemEvent(SystemEventType.BINDING_RESOLUTION_START, {
+              layout: correctedLayout, // Log corrected layout before resolving
+            })
+          );
+
+          const resolved = await resolveBindings(correctedLayout, dataContext);
+          setCurrentResolvedLayoutForRender(resolved);
+
+          systemEvents.emit(
+            createSystemEvent(SystemEventType.BINDING_RESOLUTION_COMPLETE, {
+              originalLayout: correctedLayout, // Log corrected layout
+              resolvedLayout: resolved,
+            })
+          );
+        } catch (err) {
+          console.error("Error resolving bindings:", err);
+          setUiStatus("error");
+          setCurrentResolvedLayoutForRender(null);
+        } finally {
+          setIsResolvingBindings(false);
+          // setUiStatus("idle"); // Will be set by render effect or if no layout
+        }
+      } else {
+        if (!state.layout)
+          console.log(
+            "[AutoUI] Skipping resolveBindings: state.layout is null/undefined"
+          );
+        if (!hasMeaningfulDataContext)
+          console.log(
+            "[AutoUI] Skipping resolveBindings: dataContext is not meaningfully populated yet"
+          );
+        setCurrentResolvedLayoutForRender(null);
+        if (
+          !state.loading &&
+          uiStatus !== "initializing" &&
+          !isResolvingBindings
+        )
+          setUiStatus("idle");
+      }
+    };
+
+    resolveAndSetLayout();
+  }, [state.layout, dataContext]); // Removed resolveLayoutBindings from deps, uiStatus
+
+  // Effect to render the resolved layout
+  useEffect(() => {
+    const renderLayout = async () => {
+      if (currentResolvedLayoutForRender && !isResolvingBindings) {
+        setUiStatus("rendering");
+        console.log(
+          "[AutoUI Debug] Rendering with currentResolvedLayoutForRender:",
+          JSON.stringify(currentResolvedLayoutForRender, null, 2)
         );
-        setRenderedNode(rendered);
-        systemEvents.emit(
-          createSystemEvent(SystemEventType.RENDER_COMPLETE, {
-            layout: resolvedLayout,
-            renderTimeMs: 0,
-          })
-        );
+        try {
+          systemEvents.emit(
+            createSystemEvent(SystemEventType.RENDER_START, {
+              layout: currentResolvedLayoutForRender,
+            })
+          );
+          const rendered = await renderNode(
+            currentResolvedLayoutForRender,
+            componentAdapter as "shadcn",
+            processEvent
+          );
+          setRenderedNode(rendered);
+          systemEvents.emit(
+            createSystemEvent(SystemEventType.RENDER_COMPLETE, {
+              layout: currentResolvedLayoutForRender,
+              renderTimeMs: 0, // Placeholder, actual timing would be more complex
+            })
+          );
+          setUiStatus("idle");
+        } catch (err) {
+          console.error("Error rendering node:", err);
+          setUiStatus("error");
+        }
+      } else if (
+        !currentResolvedLayoutForRender &&
+        !state.loading &&
+        !isResolvingBindings &&
+        uiStatus !== "initializing"
+      ) {
+        setRenderedNode(null);
         setUiStatus("idle");
-      } catch (err) {
-        console.error("Error rendering node:", err);
-        setUiStatus("error");
       }
-    } else {
-      setRenderedNode(null);
-      if (!state.loading && uiStatus !== "initializing") setUiStatus("idle");
-    }
-  }, [resolvedLayout, componentAdapter, processEvent]);
+    };
+    renderLayout();
+  }, [
+    currentResolvedLayoutForRender,
+    componentAdapter,
+    processEvent,
+    isResolvingBindings,
+    state.loading,
+    uiStatus,
+  ]);
 
+  // Initial status setting
   useEffect(() => {
-    renderResolvedLayout();
-  }, [renderResolvedLayout]);
-
-  useEffect(() => {
+    // Set to initializing only once on mount if not already an error
     if (uiStatus !== "error") {
       setUiStatus("initializing");
     }
-  }, []);
+  }, []); // Empty dependency array means this runs once on mount
 
+  // Handle transitions from initializing based on engine state
   useEffect(() => {
-    if (uiStatus === "initializing" && state.layout && !state.loading) {
-      // Transition handled by other effects
-    } else if (uiStatus === "initializing" && !state.loading && !state.layout) {
-      if (!state.error) setUiStatus("idle");
+    if (uiStatus === "initializing") {
+      if (state.loading) {
+        // Still initializing or engine is fetching initial layout
+      } else if (state.layout && !isResolvingBindings) {
+        // Layout received, bindings might be resolving or done, defer to other effects
+      } else if (!state.layout && !state.loading && !isResolvingBindings) {
+        // No layout, not loading, not resolving -> idle (or error if state.error)
+        if (state.error) {
+          setUiStatus("error");
+        } else {
+          setUiStatus("idle");
+        }
+      }
     }
-  }, [state.loading, state.layout, state.error, uiStatus]);
+  }, [state.loading, state.layout, state.error, uiStatus, isResolvingBindings]);
 
-  // Simplified JSX for debugging linter errors
   if (!componentsAvailable) {
     return (
       <div className="autoui-error p-4 border border-red-300 bg-red-50 text-red-700 rounded">
@@ -526,22 +574,32 @@ export const AutoUI: React.FC<AutoUIProps> = ({
     );
   }
 
+  const showShimmer =
+    (uiStatus === "initializing" || state.loading || isResolvingBindings) &&
+    !state.error;
+
   return (
     <div
       className={`autoui-root ${integration.className || ""}`}
       id={integration.id}
     >
       <div>Current Status: {uiStatus}</div>
-      {uiStatus === "idle" && renderedNode && (
+      {uiStatus === "idle" && !isResolvingBindings && renderedNode && (
         <div className="autoui-content">{renderedNode}</div>
       )}
       {state.error && <div className="autoui-error">Error: {state.error}</div>}
-      {/* Add a simple shimmer condition for testing */}
-      {(uiStatus === "initializing" || state.loading) &&
-        state.layout &&
-        !state.error && (
+
+      {showShimmer &&
+        state.layout && ( // Show shimmer if we have a layout to base it on
           <div className="autoui-loading">
             {renderShimmer(state.layout, componentAdapter as "shadcn")}
+          </div>
+        )}
+      {showShimmer &&
+        !state.layout && ( // Fallback shimmer if no layout yet
+          <div className="autoui-loading p-4">
+            <div className="w-full h-20 bg-gray-200 animate-pulse rounded mb-4" />
+            <div className="w-full h-40 bg-gray-200 animate-pulse rounded" />
           </div>
         )}
     </div>

@@ -128,10 +128,18 @@ const Detail: React.FC<{
   onBack?: (() => void) | undefined;
 }> = ({ data, fields = [], title, visible = true, onBack }) => {
   if (!visible) {
-    console.log(`[Detail Component Internal] Detail component for node id: ${data?.id || title || 'Unknown Detail'} is NOT RENDERING because visible is ${visible}.`);
+    console.log(
+      `[Detail Component Internal] Detail component for node id: ${
+        data?.id || title || "Unknown Detail"
+      } is NOT RENDERING because visible is ${visible}.`
+    );
     return null;
   }
-  console.log(`[Detail Component Internal] Detail component for node id: ${data?.id || title || 'Unknown Detail'} IS RENDERING because visible is ${visible}.`);
+  console.log(
+    `[Detail Component Internal] Detail component for node id: ${
+      data?.id || title || "Unknown Detail"
+    } IS RENDERING because visible is ${visible}.`
+  );
 
   return (
     <div className="w-full border border-gray-300 dark:border-gray-700 rounded-lg p-6 space-y-4 bg-white dark:bg-gray-900 shadow-sm">
@@ -189,8 +197,19 @@ const Detail: React.FC<{
               </div>
             );
           } catch (e) {
-            console.error(`[Detail Component Internal] Error rendering field: ${field?.key}`, e, "Field data:", field, "Full data object:", data);
-            return <div key={field?.key || 'error-field'}>Error rendering field: {field?.key}</div>;
+            console.error(
+              `[Detail Component Internal] Error rendering field: ${field?.key}`,
+              e,
+              "Field data:",
+              field,
+              "Full data object:",
+              data
+            );
+            return (
+              <div key={field?.key || "error-field"}>
+                Error rendering field: {field?.key}
+              </div>
+            );
           }
         })}
       </div>
@@ -432,11 +451,11 @@ export const adapterMap: Record<
 
     // Add a specific log here for the Detail adapter
     console.log(
-        `[Adapter Debug] Rendering Detail: id=${node.id}, props=`,
-        JSON.stringify(node.props), 
-        `effective visible=${visible}`,
-        `typeof fields=${typeof fields}`,
-        `Array.isArray(fields)=${Array.isArray(fields)}`
+      `[Adapter Debug] Rendering Detail: id=${node.id}, props=`,
+      JSON.stringify(node.props),
+      `effective visible=${visible}`,
+      `typeof fields=${typeof fields}`,
+      `Array.isArray(fields)=${Array.isArray(fields)}`
     );
 
     return (

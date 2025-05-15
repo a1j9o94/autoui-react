@@ -2,14 +2,33 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { ActionRouter } from "./action-router";
 import { ActionType, UIEventType } from "../schema/action-types";
-import { UIEvent, UISpecNode } from "../schema/ui";
+import { UIEvent, UISpecNode, PlannerInput } from "../schema/ui";
 import * as reducerModule from "./reducer";
-// Removed buildPrompt as it's not directly used in this initial test, can be re-added if needed.
+import * as plannerModule from "./planner";
 
-// Mock findNodeById if it's a dependency of ActionRouter
+// Mock findNodeById
 vi.mock("./reducer", () => ({
-  findNodeById: vi.fn(), // This is what we will mock and control per test
+  findNodeById: vi.fn(),
 }));
+
+// Mock callPlannerLLM from the planner module
+vi.mock("./planner", async () => {
+  const actualPlannerModule = await vi.importActual("./planner") as Record<string, unknown>;
+  return {
+    ...(Object.keys(actualPlannerModule).length > 0 ? actualPlannerModule : {}),
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    callPlannerLLM: vi.fn().mockImplementation(async (input: PlannerInput, _apiKey: string) => {
+      return {
+        id: `mock-llm-node-for-${input.goal || "default"}`,
+        node_type: "Container",
+        props: { title: `LLM for ${input.goal}` },
+        children: [],
+        bindings: {},
+        events: {},
+      } as UISpecNode;
+    }),
+  };
+});
 
 describe("ActionRouter (Deterministic)", () => {
   let router: ActionRouter;
@@ -19,9 +38,11 @@ describe("ActionRouter (Deterministic)", () => {
   let mockGoal: string;
   let mockUserContext: Record<string, unknown>;
   let mockedFindNodeById: ReturnType<typeof vi.fn>;
+  let mockedCallPlannerLLM: ReturnType<typeof vi.fn>;
+  const mockApiKey = "test-api-key";
 
   beforeEach(() => {
-    router = new ActionRouter();
+    router = new ActionRouter(mockApiKey);
     mockSchema = { tasks: { type: "object" } };
     mockLayout = {
       id: "root",
@@ -35,11 +56,9 @@ describe("ActionRouter (Deterministic)", () => {
     mockGoal = "Achieve test goal";
     mockUserContext = { sessionToken: "abc" };
 
-    // Get a reference to the vi.fn() created by vi.mock()
     mockedFindNodeById = reducerModule.findNodeById as ReturnType<typeof vi.fn>;
+    mockedCallPlannerLLM = plannerModule.callPlannerLLM as ReturnType<typeof vi.fn>;
 
-    // Default mock implementation: This will be called by ActionRouter.
-    // It will search in whatever layout ActionRouter passes to it (which is this.layout from ActionRouter instance).
     mockedFindNodeById.mockImplementation(function findNodeRecursively(
       currentNode: UISpecNode | undefined,
       idToFind: string
@@ -54,26 +73,22 @@ describe("ActionRouter (Deterministic)", () => {
       }
       return undefined;
     });
+    mockedCallPlannerLLM.mockClear();
   });
 
   describe("resolveRoute", () => {
-    it("should handle INIT event with FULL_REFRESH", async () => {
+    it("should handle INIT event with FULL_REFRESH, calling LLM", async () => {
       const initEvent: UIEvent = {
         type: UIEventType.INIT,
-        nodeId: "system", // sourceNode will be undefined
+        nodeId: "system",
         timestamp: Date.now(),
         payload: null,
       };
-      // findNodeById for "system" returns undefined (by default beforeEach mock or specific below)
-      // findNodeById for "root" (target) returns mockLayout
       mockedFindNodeById.mockImplementation(
-        (
-          layoutNode: UISpecNode | undefined,
-          id: string
-        ): UISpecNode | undefined => {
+        (layoutNode: UISpecNode | undefined, id: string): UISpecNode | undefined => {
           if (id === "system") return undefined;
           if (id === "root" && layoutNode?.id === "root") return layoutNode;
-          return reducerModule.findNodeById(layoutNode, id); // Passthrough to original (mocked) for other IDs
+          return undefined;
         }
       );
 
@@ -83,41 +98,29 @@ describe("ActionRouter (Deterministic)", () => {
         mockLayout,
         mockDataContext,
         mockGoal,
+        mockApiKey,
         mockUserContext
       );
       expect(resolution).toBeDefined();
-      if (resolution) {
-        expect(resolution.actionType).toBe(ActionType.FULL_REFRESH);
-        expect(resolution.targetNodeId).toBe("root");
-        expect(resolution.plannerInput.userContext).toEqual(
-          expect.objectContaining({
-            ...mockUserContext,
-            targetNode: mockLayout,
-            eventPayload: null,
-          })
-        );
-        expect(resolution.plannerInput.userContext?.sourceNode).toBeUndefined();
-        expect(resolution.directUpdateLayout).toBeDefined();
-      }
+      expect(resolution.actionType).toBe(ActionType.FULL_REFRESH);
+      expect(resolution.targetNodeId).toBe("root");
+      expect(mockedCallPlannerLLM).toHaveBeenCalled();
+      expect(resolution.updatedNode).toBeDefined();
+      expect(resolution.updatedNode?.id).toContain("mock-llm-node");
     });
 
-    it("should handle generic CLICK event with FULL_REFRESH if no node config", async () => {
+    it("should handle generic CLICK event with FULL_REFRESH if no node config, calling LLM", async () => {
       const clickEvent: UIEvent = {
         type: UIEventType.CLICK,
-        nodeId: "some-button-id", // sourceNode will be undefined
+        nodeId: "some-button-id",
         timestamp: Date.now(),
         payload: { x: 10, y: 20 },
       };
-      // findNodeById for "some-button-id" returns undefined
-      // findNodeById for "root" (target) returns mockLayout
       mockedFindNodeById.mockImplementation(
-        (
-          layoutNode: UISpecNode | undefined,
-          id: string
-        ): UISpecNode | undefined => {
+        (layoutNode: UISpecNode | undefined, id: string): UISpecNode | undefined => {
           if (id === "some-button-id") return undefined;
           if (id === "root" && layoutNode?.id === "root") return layoutNode;
-          return reducerModule.findNodeById(layoutNode, id);
+          return undefined;
         }
       );
 
@@ -127,25 +130,18 @@ describe("ActionRouter (Deterministic)", () => {
         mockLayout,
         mockDataContext,
         mockGoal,
+        mockApiKey,
         mockUserContext
       );
       expect(resolution).toBeDefined();
-      if (resolution) {
-        expect(resolution.actionType).toBe(ActionType.FULL_REFRESH);
-        expect(resolution.targetNodeId).toBe("root");
-        expect(resolution.plannerInput.userContext).toEqual(
-          expect.objectContaining({
-            ...mockUserContext,
-            targetNode: mockLayout,
-            eventPayload: clickEvent.payload,
-          })
-        );
-        expect(resolution.plannerInput.userContext?.sourceNode).toBeUndefined();
-        expect(resolution.directUpdateLayout).toBeDefined();
-      }
+      expect(resolution.actionType).toBe(ActionType.FULL_REFRESH);
+      expect(resolution.targetNodeId).toBe("root");
+      expect(mockedCallPlannerLLM).toHaveBeenCalled();
+      expect(resolution.updatedNode).toBeDefined();
+      expect(resolution.updatedNode?.id).toContain("mock-llm-node");
     });
 
-    it("should default to FULL_REFRESH for CLICK on Button with no specific event config", async () => {
+    it("should default to FULL_REFRESH for CLICK on Button with no specific event config, calling LLM", async () => {
       const buttonNode: UISpecNode = {
         id: "actual-button-id",
         node_type: "Button",
@@ -154,31 +150,11 @@ describe("ActionRouter (Deterministic)", () => {
         children: null,
         bindings: null,
       };
-      // findNodeById for "actual-button-id" (source) returns buttonNode
-      // findNodeById for "root" (target, as per logic for unconf. button) returns mockLayout
       mockedFindNodeById.mockImplementation(
-        (
-          layoutNode: UISpecNode | undefined,
-          id: string
-        ): UISpecNode | undefined => {
+        (layoutNode: UISpecNode | undefined, id: string): UISpecNode | undefined => {
           if (id === buttonNode.id) return buttonNode;
           if (id === "root" && layoutNode?.id === "root") return layoutNode;
-          // Simplified recursive search for this test case
-          function find(
-            node: UISpecNode | undefined,
-            targetId: string
-          ): UISpecNode | undefined {
-            if (!node) return undefined;
-            if (node.id === targetId) return node;
-            if (node.children) {
-              for (const child of node.children) {
-                const f = find(child, targetId);
-                if (f) return f;
-              }
-            }
-            return undefined;
-          }
-          return find(layoutNode, id);
+          return undefined;
         }
       );
 
@@ -194,25 +170,18 @@ describe("ActionRouter (Deterministic)", () => {
         mockLayout,
         mockDataContext,
         mockGoal,
+        mockApiKey,
         mockUserContext
       );
       expect(resolution).toBeDefined();
-      if (resolution) {
-        expect(resolution.actionType).toBe(ActionType.FULL_REFRESH);
-        expect(resolution.targetNodeId).toBe("root");
-        expect(resolution.plannerInput.userContext).toEqual(
-          expect.objectContaining({
-            ...mockUserContext,
-            sourceNode: buttonNode,
-            targetNode: mockLayout,
-            eventPayload: null,
-          })
-        );
-        expect(resolution.directUpdateLayout).toBeDefined();
-      }
+      expect(resolution.actionType).toBe(ActionType.FULL_REFRESH);
+      expect(resolution.targetNodeId).toBe("root");
+      expect(mockedCallPlannerLLM).toHaveBeenCalled();
+      expect(resolution.updatedNode).toBeDefined();
+      expect(resolution.updatedNode?.id).toContain("mock-llm-node");
     });
 
-    it("should use node-specific config for CLICK event", async () => {
+    it("should use node-specific config for CLICK event (SHOW_DETAIL), calling LLM", async () => {
       const detailSectionNode: UISpecNode = {
         id: "detail-section-abc",
         node_type: "Container",
@@ -235,7 +204,6 @@ describe("ActionRouter (Deterministic)", () => {
           },
         },
       };
-      // Update mockLayout to include this button
       mockLayout = {
         id: "root",
         node_type: "Container",
@@ -247,10 +215,7 @@ describe("ActionRouter (Deterministic)", () => {
 
       mockedFindNodeById.mockImplementation(
         (layoutToSearch: UISpecNode | null | undefined, id: string) => {
-          function find(
-            node: UISpecNode | undefined,
-            targetId: string
-          ): UISpecNode | undefined {
+          function find(node: UISpecNode | undefined, targetId: string): UISpecNode | undefined {
             if (!node) return undefined;
             if (node.id === targetId) return node;
             if (node.children) {
@@ -277,24 +242,21 @@ describe("ActionRouter (Deterministic)", () => {
         mockLayout,
         mockDataContext,
         mockGoal,
+        mockApiKey,
         mockUserContext
       );
       expect(resolution).toBeDefined();
-      if (resolution) {
-        expect(resolution.actionType).toBe(ActionType.SHOW_DETAIL);
-        expect(resolution.targetNodeId).toBe("detail-section-abc");
-        expect(resolution.plannerInput.userContext).toEqual(
-          expect.objectContaining({
-            ...mockUserContext,
-            sourceNode: nodeWithEventConfig,
-            eventPayload: { clickX: 100, clickY: 50, mode: "edit" },
-          })
-        );
-        expect(resolution.directUpdateLayout).toBeDefined();
-      }
+      expect(resolution.actionType).toBe(ActionType.UPDATE_CONTEXT);
+      expect(resolution.targetNodeId).toBe("detail-section-abc");
+      expect(resolution.updatedDataContext).toBeDefined();
+      expect(resolution.updatedDataContext?.isTaskDetailDialogVisible).toBe(true);
+      expect(resolution.updatedDataContext?.selectedTask).toBeUndefined();
+      expect(mockedCallPlannerLLM).toHaveBeenCalled();
+      expect(resolution.updatedNode).toBeDefined();
+      expect(resolution.updatedNode?.id).toContain("mock-llm-node");
     });
 
-    it("should default to UPDATE_DATA for CHANGE on Input with no specific event config", async () => {
+    it("should default to UPDATE_DATA for CHANGE on Input, not calling LLM", async () => {
       const inputNode: UISpecNode = {
         id: "input-field-id",
         node_type: "Input",
@@ -303,13 +265,18 @@ describe("ActionRouter (Deterministic)", () => {
         events: null,
         children: null,
       };
-      // findNodeById for "input-field-id" (source AND target) returns inputNode
+      mockLayout = { 
+        id: "root-for-update-data",
+        node_type: "Container", 
+        props: { className: "test-layout" },
+        bindings: {},
+        events: {},
+        children: [inputNode]
+      }; 
       mockedFindNodeById.mockImplementation(
-        (
-          layoutNode: UISpecNode | undefined,
-          id: string
-        ): UISpecNode | undefined => {
+        ( layoutNode: UISpecNode | undefined, id: string ): UISpecNode | undefined => {
           if (id === "input-field-id") return inputNode;
+          if (layoutNode && id === layoutNode.id && layoutNode.id === "root-for-update-data") return layoutNode; 
           return undefined;
         }
       );
@@ -323,30 +290,19 @@ describe("ActionRouter (Deterministic)", () => {
       const resolution = await router.resolveRoute(
         changeEvent,
         mockSchema,
-        mockLayout,
+        mockLayout, 
         mockDataContext,
         mockGoal,
+        mockApiKey, 
         mockUserContext
       );
       expect(resolution).toBeDefined();
-      if (resolution) {
-        expect(resolution.actionType).toBe(ActionType.UPDATE_DATA);
-        expect(resolution.targetNodeId).toBe("input-field-id");
-        expect(resolution.plannerInput.userContext).toEqual(
-          expect.objectContaining({
-            ...mockUserContext,
-            sourceNode: inputNode,
-            targetNode: inputNode,
-            eventPayload: { value: "newValue" },
-          })
-        );
-        // Assert that updatedDataContext is present and updated
-        expect(resolution.updatedDataContext).toBeDefined();
-        expect(typeof resolution.updatedDataContext).toBe("object");
-      }
+      expect(resolution.actionType).toBe(ActionType.UPDATE_DATA);
+      expect(resolution.targetNodeId).toBe("input-field-id");
+      expect(resolution.updatedDataContext).toBeDefined();
+      expect(mockedCallPlannerLLM).not.toHaveBeenCalled();
+      expect(resolution.updatedNode).toEqual(mockLayout); 
     });
-
-    // --- Tests for Dialog Interactions ---
 
     const createDialogLayout = (
       dialogId: string,
@@ -359,13 +315,7 @@ describe("ActionRouter (Deterministic)", () => {
           node_type: "Button",
           props: { label: "Close" },
           bindings: null,
-          events: {
-            CLICK: {
-              action: ActionType.HIDE_DIALOG,
-              target: dialogId,
-              payload: null,
-            },
-          },
+          events: { CLICK: { action: ActionType.HIDE_DIALOG, target: dialogId, payload: null } },
           children: null,
         },
       ];
@@ -375,13 +325,7 @@ describe("ActionRouter (Deterministic)", () => {
           node_type: "Button",
           props: { label: "Save" },
           bindings: null,
-          events: {
-            CLICK: {
-              action: ActionType.SAVE_TASK_CHANGES,
-              target: dialogId,
-              payload: { data: "sample" },
-            },
-          },
+          events: { CLICK: { action: ActionType.SAVE_TASK_CHANGES, target: dialogId, payload: { data: "sample" } } },
           children: null,
         });
       }
@@ -392,14 +336,7 @@ describe("ActionRouter (Deterministic)", () => {
         bindings: null,
         events: null,
         children: [
-          {
-            id: "main-view",
-            node_type: "Container",
-            children: [],
-            props: null,
-            bindings: null,
-            events: null,
-          },
+          { id: "main-view", node_type: "Container", children: [], props: null, bindings: null, events: null },
           {
             id: dialogId,
             node_type: "Dialog",
@@ -412,22 +349,15 @@ describe("ActionRouter (Deterministic)", () => {
       };
     };
 
-    it("should handle HIDE_DIALOG directly by updating layout without LLM", async () => {
+    it("should handle HIDE_DIALOG directly, not calling LLM", async () => {
       const dialogId = "myTestDialog";
       const closeButtonId = "myTestDialog-closeButton";
       mockLayout = createDialogLayout(dialogId, closeButtonId);
-      mockDataContext.isMyDialogVisible = true; // Simulate dialog is open in context
+      const initialDataContext = { ...mockDataContext, isMyDialogVisible: true };
 
-      // This mockedFindNodeById will be used by the router AND the test assertions
       mockedFindNodeById.mockImplementation(
-        (
-          layoutToSearch: UISpecNode | undefined,
-          idToFind: string
-        ): UISpecNode | undefined => {
-          function findRecursively(
-            node: UISpecNode | undefined,
-            id: string
-          ): UISpecNode | undefined {
+        (layoutToSearch: UISpecNode | undefined, idToFind: string): UISpecNode | undefined => {
+          function findRecursively(node: UISpecNode | undefined, id: string): UISpecNode | undefined {
             if (!node) return undefined;
             if (node.id === id) return node;
             if (node.children) {
@@ -452,81 +382,37 @@ describe("ActionRouter (Deterministic)", () => {
       const resolution = await router.resolveRoute(
         event,
         mockSchema,
-        mockLayout, // Pass the prepared mockLayout
-        mockDataContext,
-        mockGoal,
-        mockUserContext
-      );
-
-      expect(resolution).toBeDefined();
-      expect(resolution.actionType).toBe(ActionType.HIDE_DIALOG);
-      expect(resolution.directUpdateLayout).toBeDefined();
-
-      if (resolution.directUpdateLayout) {
-        const updatedDialogNode = mockedFindNodeById(
-          resolution.directUpdateLayout,
-          dialogId
-        ) as UISpecNode | undefined;
-        expect(updatedDialogNode).toBeDefined();
-        // Ensure props exist and visible is false
-        expect(updatedDialogNode!.props).toBeDefined();
-        expect(updatedDialogNode!.props!.visible).toBe(false);
-      }
-    });
-
-    it("should still prepare a prompt for FULL_REFRESH actions (LLM)", async () => {
-      const initEvent: UIEvent = {
-        type: UIEventType.INIT,
-        nodeId: "system",
-        timestamp: Date.now(),
-        payload: null,
-      };
-      mockedFindNodeById.mockImplementation(
-        (
-          layoutNode: UISpecNode | undefined,
-          id: string
-        ): UISpecNode | undefined => {
-          if (id === "system") return undefined;
-          if (id === "root" && layoutNode?.id === "root") return layoutNode;
-          return reducerModule.findNodeById(layoutNode, id);
-        }
-      );
-      const resolution = await router.resolveRoute(
-        initEvent,
-        mockSchema,
         mockLayout,
-        mockDataContext,
+        initialDataContext,
         mockGoal,
+        mockApiKey,
         mockUserContext
       );
+
       expect(resolution).toBeDefined();
-      expect(resolution.actionType).toBe(ActionType.FULL_REFRESH);
-      expect(resolution.directUpdateLayout).toBeDefined();
+      expect(resolution.actionType).toBe(ActionType.UPDATE_CONTEXT); 
+      expect(resolution.updatedNode).toEqual(mockLayout); 
+      expect(resolution.updatedDataContext?.isTaskDetailDialogVisible).toBe(false);
+      expect(resolution.updatedDataContext?.selectedTask).toBeNull(); 
+      expect(mockedCallPlannerLLM).not.toHaveBeenCalled();
     });
 
-    it("should handle SAVE_TASK_CHANGES action from a button within an open dialog", async () => {
+    it("should handle SAVE_TASK_CHANGES action, not calling LLM", async () => {
       const dialogId = "mySaveDialog";
-      const closeButtonId = "mySaveDialog-closeButton"; // Still need a way to find it for the general mock
+      const closeButtonId = "mySaveDialog-closeButton";
       const saveButtonId = "mySaveDialog-saveButton";
       mockLayout = createDialogLayout(dialogId, closeButtonId, saveButtonId);
-      mockDataContext.isMyDialogVisible = true;
-      mockDataContext.selectedTask = { id: "task1", title: "Original Title" };
-      mockDataContext.tasks = {
-        data: [{ id: "task1", title: "Original Title" }],
+      const initialDataContext = {
+        ...mockDataContext,
+        isMyDialogVisible: true,
+        selectedTask: { id: "task1", title: "Original Title" },
+        tasks: { data: [{ id: "task1", title: "Original Title" }] },
       };
-
-      const currentTestLayout = mockLayout; // Closure to capture the correct layout
-      // Override the global mock for this specific test case
+      
+      const currentTestLayout = mockLayout;
       mockedFindNodeById.mockImplementation(
-        (
-          _layoutNode: UISpecNode | undefined,
-          idToFind: string
-        ): UISpecNode | undefined => {
-          // This custom mock implementation searches within the specific currentTestLayout
-          function findInCurrentTestLayout(
-            node: UISpecNode | undefined,
-            id: string
-          ): UISpecNode | undefined {
+        (_layoutNode: UISpecNode | undefined, idToFind: string): UISpecNode | undefined => {
+          function findInCurrentTestLayout(node: UISpecNode | undefined, id: string): UISpecNode | undefined {
             if (!node) return undefined;
             if (node.id === id) return node;
             if (node.children) {
@@ -545,47 +431,25 @@ describe("ActionRouter (Deterministic)", () => {
         type: UIEventType.CLICK,
         nodeId: saveButtonId,
         timestamp: Date.now(),
-        payload: { formValue: "updated title" }, // Event payload from a form field, for example
+        payload: { formValue: "updated title" },
       };
 
       const resolution = await router.resolveRoute(
         event,
         mockSchema,
         mockLayout,
-        mockDataContext,
+        initialDataContext,
         mockGoal,
+        mockApiKey,
         mockUserContext
       );
 
       expect(resolution).toBeDefined();
       expect(resolution.actionType).toBe(ActionType.SAVE_TASK_CHANGES);
-      expect(resolution.targetNodeId).toBe(dialogId); // Target for UI update is the dialog
-      expect(
-        (resolution.plannerInput.userContext?.sourceNode as UISpecNode)?.id
-      ).toBe(saveButtonId);
-      expect(
-        (resolution.plannerInput.userContext?.targetNode as UISpecNode)?.id
-      ).toBe(dialogId);
-      expect(
-        resolution.plannerInput.userContext?.eventPayload as {
-          data: string;
-          formValue: string;
-        }
-      ).toEqual({ data: "sample", formValue: "updated title" }); // Merged payload
-      expect(
-        resolution.plannerInput.userContext?.selectedTask as {
-          id: string;
-          title: string;
-        }
-      ).toEqual({ id: "task1", title: "Original Title" });
-      expect(
-        resolution.plannerInput.userContext?.tasks as {
-          data: { id: string; title: string }[];
-        }
-      ).toBeDefined();
-      expect(resolution.directUpdateLayout).toBeDefined();
+      expect(resolution.targetNodeId).toBe(dialogId);
+      expect(resolution.updatedNode).toEqual(mockLayout); 
+      expect(resolution.updatedDataContext).toBeDefined();
+      expect(mockedCallPlannerLLM).not.toHaveBeenCalled();
     });
-
-    // More tests will go here
   });
 });

@@ -146,11 +146,11 @@ describe("Shadcn Adapter - renderNode", () => {
       id: "detail-1",
       node_type: "Detail",
       bindings: null, // Bindings are not used directly by adapter for these, resolveBindings would have moved them
-      props: { 
-        title: "Item Details", 
+      props: {
+        title: "Item Details",
         visible: true, // Explicitly set for clarity
-        data,      // Moved from bindings to props
-        fields     // Moved from bindings to props
+        data, // Moved from bindings to props
+        fields, // Moved from bindings to props
       },
     });
 

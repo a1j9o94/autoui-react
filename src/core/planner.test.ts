@@ -1,11 +1,9 @@
 /// <reference types="vitest/globals" />
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { SpyInstance } from "vitest";
-import { PlannerInput, UIEvent, UISpecNode } from "../schema/ui";
-import { ActionType, UIEventType } from "../schema/action-types";
+import { PlannerInput, UISpecNode } from "../schema/ui";
 // Restore static imports
-import { mockPlanner, callPlannerLLM, processEvent } from "./planner";
-import { ActionRouter, RouteResolution } from "./action-router";
+import { callPlannerLLM } from "./planner";
 
 // Mock the system events
 vi.mock("./system-events", () => ({
@@ -38,56 +36,8 @@ describe("Planner", () => {
     consoleErrorSpy.mockRestore();
   });
 
-  describe("mockPlanner", () => {
-    it("should return a mock UI spec node", () => {
-      const input: PlannerInput = {
-        schema: {},
-        goal: "Test goal",
-        history: null,
-        userContext: null,
-      };
-
-      const mockNode = mockPlanner(input);
-
-      expect(mockNode.id).toBe("root");
-      expect(mockNode.node_type).toBe("Container");
-      // Find the ListView node within the mock structure
-      // Note: This structure might change if mockPlanner is updated significantly
-      const mainContent = mockNode.children?.find(
-        (c) => c.id === "main-content"
-      );
-      const tasksContainer = mainContent?.children?.find(
-        (c) => c.id === "tasks-container"
-      );
-      const listView = tasksContainer?.children?.find(
-        (c) => c.node_type === "ListView"
-      );
-
-      expect(listView).toBeDefined();
-      expect(listView?.bindings).toBeDefined();
-      // Expect the data binding key to be 'data' and the value to be the path 'tasks.data'
-      expect(listView?.bindings?.data).toBe("tasks.data");
-      // Optionally, check that the old 'items' binding is gone (or adjust if standard changes)
-      // expect(listView?.bindings?.items).toBeUndefined();
-    });
-
-    it("should use provided targetNodeId", () => {
-      const input: PlannerInput = {
-        schema: {},
-        goal: "Test goal",
-        history: null,
-        userContext: null,
-      };
-
-      const mockNode = mockPlanner(input, "custom-id");
-
-      expect(mockNode.id).toBe("custom-id");
-    });
-  });
-
   describe("callPlannerLLM", () => {
-    it("should use mock planner when no API key is provided", async () => {
-      // Use the statically imported callPlannerLLM
+    it("should return placeholder UI when no API key is provided", async () => {
       const input: PlannerInput = {
         schema: {},
         goal: "Test goal",
@@ -95,15 +45,16 @@ describe("Planner", () => {
         userContext: null,
       };
 
-      // Call the statically imported function without providing an API key.
-      // The internal logic of callPlannerLLM should now handle this and return the mock.
-      const result = await callPlannerLLM(input, "", undefined);
+      const result = await callPlannerLLM(input, "");
 
-      // Verify the mock result
       expect(result).toBeDefined();
-      expect(result.id).toBe("root");
+      expect(result.id).toBe("root-no-api-key");
       expect(result.node_type).toBe("Container");
-      expect(result.children).toHaveLength(2);
+      expect(result.children).toHaveLength(1);
+      const messageNode = result.children?.[0];
+      expect(messageNode?.id).toBe("no-api-key-message");
+      expect(messageNode?.node_type).toBe("Text");
+      expect(messageNode?.props?.text).toContain("OpenAI API Key is required");
     });
 
     // Add a test case for MOCK_PLANNER env var if desired (optional)
@@ -137,17 +88,12 @@ describe("Planner", () => {
           history: null,
           userContext: null,
         };
-        const mockRouteResolution: RouteResolution = {
-          actionType: ActionType.FULL_REFRESH,
-          targetNodeId: "root",
-          plannerInput: input,
-        };
+
 
         try {
           const result = await callPlannerLLM(
             input,
             process.env.VITE_OPENAI_API_KEY || "",
-            mockRouteResolution
           );
           expect(result).toBeDefined();
           expect(result.id).toBeDefined();
@@ -171,17 +117,10 @@ describe("Planner", () => {
           history: null,
           userContext: null,
         };
-        const mockRouteResolution: RouteResolution = {
-          actionType: ActionType.FULL_REFRESH,
-          targetNodeId: "root",
-          plannerInput: input,
-        };
-
         try {
           const result = await callPlannerLLM(
             input,
             process.env.VITE_OPENAI_API_KEY || "",
-            mockRouteResolution
           );
 
           // Find the ListView node within the result
@@ -206,17 +145,11 @@ describe("Planner", () => {
           history: null,
           userContext: null,
         };
-        const mockRouteResolution: RouteResolution = {
-          actionType: ActionType.FULL_REFRESH,
-          targetNodeId: "root",
-          plannerInput: input,
-        };
 
         try {
           const result = await callPlannerLLM(
             input,
             process.env.VITE_OPENAI_API_KEY || "", // Fallback to empty string for environments without a key
-            mockRouteResolution
           );
           console.log("Button call result\n", result);
 
@@ -235,43 +168,4 @@ describe("Planner", () => {
       }, 30000); // Increase timeout if needed
     }
   );
-
-  // processEvent test
-  describe("processEvent", () => {
-    it("should throw an error when no route is found", async () => {
-      // Use statically imported processEvent
-      const emptyRouter = new ActionRouter();
-      const resolveRouteSpy = vi.spyOn(emptyRouter, "resolveRoute");
-      // Mock to simulate the promise resolving to a null-like RouteResolution
-      resolveRouteSpy.mockResolvedValue(null as unknown as RouteResolution);
-      const event: UIEvent = {
-        type: UIEventType.CLICK,
-        nodeId: "button",
-        timestamp: Date.now(),
-        payload: null,
-      };
-      const layout: UISpecNode = {
-        id: "root",
-        node_type: "Container",
-        props: null,
-        bindings: null,
-        events: null,
-        children: null,
-      };
-
-      await expect(
-        // Pass undefined for API key, processEvent passes it down
-        processEvent(
-          event,
-          emptyRouter,
-          {},
-          layout,
-          {},
-          "Test goal",
-          undefined,
-          undefined
-        )
-      ).rejects.toThrow("No route found for event");
-    });
-  });
 });

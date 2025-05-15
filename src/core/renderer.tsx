@@ -17,7 +17,7 @@ const renderedNodesCache = new Map<
   string,
   { element: React.ReactElement; timestamp: number }
 >();
-const MAX_CACHE_SIZE = 10; 
+const MAX_CACHE_SIZE = 10;
 const CACHE_TTL = 5000; // 5 seconds
 
 // Export for targeted cache clearing
@@ -28,26 +28,30 @@ export const clearRenderedNodeCacheEntry = (cacheKey: string) => {
 
 // Function to construct the cache key, can also be exported if needed elsewhere
 export const getRendererCacheKey = (node: UISpecNode): string => {
-  if (node.id === 'task-detail') {
+  if (node.id === "task-detail") {
     // Simplified key for task-detail for more reliable cache invalidation
     const dataId = (node.props?.data as { id?: string | number })?.id;
-    return `${node.id}:${node.props?.visible}:${dataId || 'no-data-selected'}`;
+    return `${node.id}:${node.props?.visible}:${dataId || "no-data-selected"}`;
   }
 
   // Default detailed key for other nodes
-  let propsString = 'null';
+  let propsString = "null";
   try {
     propsString = JSON.stringify(node.props);
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  } catch (_e) { 
-    console.warn(`[Renderer Cache Key] Error stringifying node.props for ID ${node.id}, using 'null' for props part of key.`);
+  } catch (_e) {
+    console.warn(
+      `[Renderer Cache Key] Error stringifying node.props for ID ${node.id}, using 'null' for props part of key.`
+    );
   }
-  let bindingsString = 'null';
+  let bindingsString = "null";
   try {
     bindingsString = JSON.stringify(node.bindings);
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  } catch (_e) { 
-    console.warn(`[Renderer Cache Key] Error stringifying node.bindings for ID ${node.id}, using 'null' for bindings part of key.`);
+  } catch (_e) {
+    console.warn(
+      `[Renderer Cache Key] Error stringifying node.bindings for ID ${node.id}, using 'null' for bindings part of key.`
+    );
   }
   return `${node.id}:${propsString}:${bindingsString}`;
 };
@@ -64,10 +68,10 @@ export async function renderNode(
   adapter: "shadcn" = "shadcn",
   processEvent?: (event: UIEvent) => void
 ): Promise<React.ReactElement> {
-  const startTime = Date.now(); 
+  const startTime = Date.now();
   const cacheKey = getRendererCacheKey(node);
   const cachedItem = renderedNodesCache.get(cacheKey);
-  
+
   // Standard Cache Check - RESTORED
   if (cachedItem && startTime - cachedItem.timestamp < CACHE_TTL) {
     return cachedItem.element;
@@ -79,8 +83,8 @@ export async function renderNode(
 
   // MOVED THIS LOG UP: For task-detail, log BEFORE the RENDER_START event emission
   if (node.id === "task-detail") {
-    let safeNodeString = 'Error stringifying node for log';
-    let propsToLog = '{}';
+    let safeNodeString = "Error stringifying node for log";
+    let propsToLog = "{}";
     try {
       const clonedProps = node.props ? { ...node.props } : {};
       if (clonedProps && clonedProps.data) {
@@ -93,26 +97,34 @@ export async function renderNode(
       }
       propsToLog = JSON.stringify(clonedProps);
 
-      const nodeToLog = { 
-        id: node.id, 
-        node_type: node.node_type, 
-        props: 'See props above',
+      const nodeToLog = {
+        id: node.id,
+        node_type: node.node_type,
+        props: "See props above",
         bindings: node.bindings,
         events: node.events,
-        children: node.children ? `Children array (length: ${node.children.length}, logging suppressed)` : null 
+        children: node.children
+          ? `Children array (length: ${node.children.length}, logging suppressed)`
+          : null,
       };
       safeNodeString = JSON.stringify(nodeToLog);
-    } catch (e: unknown) { 
+    } catch (e: unknown) {
       if (e instanceof Error) {
         safeNodeString = `Error stringifying node for log: ${e.message}`;
       } else {
         safeNodeString = `Error stringifying node for log: Unknown error`;
       }
-      if (node.props === undefined) propsToLog = 'undefined';
-      else if (node.props === null) propsToLog = 'null';
+      if (node.props === undefined) propsToLog = "undefined";
+      else if (node.props === null) propsToLog = "null";
     }
     console.log(
-      `[Renderer renderNode BEFORE RENDER_START event] About to call adapter for task-detail. ID: ${node.id}, Visible: ${node.props?.visible}, Props (safe): ${propsToLog}, Bindings: ${JSON.stringify(node.bindings)}, Node (safe): ${safeNodeString}`
+      `[Renderer renderNode BEFORE RENDER_START event] About to call adapter for task-detail. ID: ${
+        node.id
+      }, Visible: ${
+        node.props?.visible
+      }, Props (safe): ${propsToLog}, Bindings: ${JSON.stringify(
+        node.bindings
+      )}, Node (safe): ${safeNodeString}`
     );
   }
 
@@ -133,14 +145,22 @@ export async function renderNode(
 
   if (node.id === "task-detail") {
     let elementType: string | undefined = undefined;
-    if (result && typeof (result as React.ReactElement).type === 'function') {
-      elementType = ((result as React.ReactElement).type as { name: string }).name;
-    } else if (result && typeof (result as React.ReactElement).type === 'string') {
+    if (result && typeof (result as React.ReactElement).type === "function") {
+      elementType = ((result as React.ReactElement).type as { name: string })
+        .name;
+    } else if (
+      result &&
+      typeof (result as React.ReactElement).type === "string"
+    ) {
       elementType = (result as React.ReactElement).type as string;
-    } else if (result && typeof (result as React.ReactElement).type === 'object' && (result as React.ReactElement).type !== null) {
+    } else if (
+      result &&
+      typeof (result as React.ReactElement).type === "object" &&
+      (result as React.ReactElement).type !== null
+    ) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const componentType = (result as React.ReactElement).type as any;
-      if (typeof componentType.displayName === 'string') {
+      if (typeof componentType.displayName === "string") {
         elementType = componentType.displayName;
       }
     }
@@ -153,14 +173,14 @@ export async function renderNode(
   await systemEvents.emit(
     createSystemEvent(SystemEventType.RENDER_COMPLETE, {
       layout: node,
-      renderTimeMs: Date.now() - startTime, 
+      renderTimeMs: Date.now() - startTime,
     })
   );
 
   // Store in cache - RESTORED
   renderedNodesCache.set(cacheKey, {
     element: result,
-    timestamp: startTime, 
+    timestamp: startTime,
   });
 
   // Clean cache if it gets too big - RESTORED
@@ -168,7 +188,7 @@ export async function renderNode(
     // Delete oldest entry
     const oldestEntry = renderedNodesCache.entries().next().value;
     if (oldestEntry) {
-        renderedNodesCache.delete(oldestEntry[0]);
+      renderedNodesCache.delete(oldestEntry[0]);
     }
   }
 
