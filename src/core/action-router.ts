@@ -167,11 +167,11 @@ export interface RouteResolution {
  * Action router class - handles determining what part of the UI to update
  */
 export class ActionRouter {
-  private openaiApiKey: string;
+  private apiKey: string;
   private planningConfig: PlanningConfig;
 
-  constructor(openaiApiKey: string, planningConfig?: PlanningConfig) {
-    this.openaiApiKey = openaiApiKey;
+  constructor(apiKey: string, planningConfig?: PlanningConfig) {
+    this.apiKey = apiKey;
     this.planningConfig = planningConfig || {
       prefetchDepth: 1,
       temperature: 0.5,
@@ -192,7 +192,7 @@ export class ActionRouter {
     layout: UISpecNode | null,
     dataContext: DataContext,
     goal: string,
-    openaiApiKey: string,
+    apiKey: string,
     userContext?: Record<string, unknown>,
   ): Promise<RouteResolution> {
     console.log(
@@ -280,7 +280,7 @@ export class ActionRouter {
         isTaskDetailDialogVisible: true,
       };
 
-      const layoutFromLLM = await callPlannerLLM(plannerInput, openaiApiKey);
+      const layoutFromLLM = await callPlannerLLM(plannerInput, apiKey);
 
       return {
         actionType: ActionType.UPDATE_CONTEXT,
@@ -338,7 +338,7 @@ export class ActionRouter {
       ActionType.NAVIGATE,
       ActionType.UPDATE_CONTEXT
     ].includes(actionType)) {
-      const layoutFromLLM = await callPlannerLLM(plannerInput, openaiApiKey);
+      const layoutFromLLM = await callPlannerLLM(plannerInput, apiKey);
 
       return {
         actionType,

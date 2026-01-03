@@ -79,7 +79,7 @@ describe("useUIStateEngine", () => {
   const defaultOptions: UseUIStateEngineOptions = {
     schema: { users: { id: "string", name: "string" } },
     goal: "Manage users",
-    openaiApiKey: "test-api-key-for-state", // Added openaiApiKey
+    apiKey: "test-api-key-for-state",
     userContext: undefined,
     dataContext: {}, // Ensure dataContext is initialized for tests
     planningConfig: { prefetchDepth: 0, temperature: 0.1, streaming: false }, // ensure defined
@@ -125,10 +125,10 @@ describe("useUIStateEngine", () => {
       expect(resolveRouteSpy).toHaveBeenCalledWith(
         expect.objectContaining({ type: "INIT" }),
         defaultOptions.schema,
-        null, 
-        defaultOptions.dataContext, 
+        null,
+        defaultOptions.dataContext,
         defaultOptions.goal,
-        defaultOptions.openaiApiKey,
+        defaultOptions.apiKey,
         defaultOptions.userContext
       );
       expect(dispatchSpy).toHaveBeenCalledWith({
@@ -159,7 +159,7 @@ describe("useUIStateEngine", () => {
         null,
         defaultOptions.dataContext,
         defaultOptions.goal,
-        defaultOptions.openaiApiKey,
+        defaultOptions.apiKey,
         defaultOptions.userContext
       );
       expect(dispatchSpy).toHaveBeenCalledWith({ type: "ERROR", message: errorMessage });
@@ -205,7 +205,7 @@ describe("useUIStateEngine", () => {
         currentLayoutForEvent,
         defaultOptions.dataContext,
         defaultOptions.goal,
-        defaultOptions.openaiApiKey,
+        defaultOptions.apiKey,
         defaultOptions.userContext
       );
       expect(dispatchSpy).toHaveBeenCalledWith({ type: "UI_EVENT", event: testEvent });
@@ -250,7 +250,7 @@ describe("useUIStateEngine", () => {
         currentLayoutForEvent,
         defaultOptions.dataContext,
         defaultOptions.goal,
-        defaultOptions.openaiApiKey,
+        defaultOptions.apiKey,
         defaultOptions.userContext
       );
       expect(dispatchSpy).toHaveBeenCalledWith({ type: "UI_EVENT", event: testEvent });

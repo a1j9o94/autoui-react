@@ -982,6 +982,30 @@ export const adapterMap: Record<
       </p>
     );
   },
+
+  Badge: (node) => {
+    const { className, style: styleProp, key, ...restProps } = node.props || {};
+    const text = getSafeProp(node.props, "text", isString, "");
+    const style =
+      typeof styleProp === "string"
+        ? parseStyleString(styleProp)
+        : (styleProp as React.CSSProperties | undefined);
+
+    // Simple badge styling using Tailwind
+    return (
+      <span
+        key={key as React.Key}
+        className={cn(
+          "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-800",
+          className as string
+        )}
+        style={style}
+        {...restProps}
+      >
+        {text}
+      </span>
+    );
+  },
 };
 
 export function renderNode(

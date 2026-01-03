@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "setup-ui": "cd ../.. && npm run setup-shadcn -- --cwd examples/basic-demo"
+    "setup-ui": "cd ../.. && npm run setup-shadcn -- --cwd examples/basic-demo",
+    "test:e2e": "npx playwright test",
+    "test:e2e:ui": "npx playwright test --ui",
+    "test:e2e:debug": "npx playwright test --debug",
+    "test:e2e:headed": "npx playwright test --headed"
   },
   "dependencies": {
     "ai": "^4.3.15",
@@ -19,6 +23,7 @@
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.57.0",
     "@types/node": "^20.10.5",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
@@ -27,4 +32,4 @@
     "tailwindcss": "^3.4.0",
     "typescript": "^5.3.3"
   }
-} 
+}

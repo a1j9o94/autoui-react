@@ -25,6 +25,7 @@ export const componentType = z.enum([
   "Detail",
   "Tabs",
   "Dialog",
+  "Badge",
 
   // Typography
   "Heading",
@@ -124,6 +125,12 @@ export const componentConfig = {
     requiredProps: ["name", "options"],
     optionalProps: ["label", "value", "disabled"],
     events: ["onChange"],
+  },
+  Badge: {
+    component: "span",
+    requiredProps: ["text"],
+    optionalProps: ["className", "variant"],
+    events: [],
   },
 };
 

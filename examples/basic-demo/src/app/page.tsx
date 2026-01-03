@@ -101,17 +101,17 @@ export default function Home() {
   return (
     <main className="container mx-auto p-4">
       <h1 className="text-2xl font-bold mb-6">AutoUI React Example</h1>
-      {/* 
-        Set mockMode={false} to use a real LLM (requires OpenAI API key in your environment).
+      {/*
+        Set mockMode={false} to use a real LLM (requires Anthropic API key in your environment).
         Set mockMode={true} to use local mock data for development.
       */}
       <div className="border rounded-lg p-4 bg-white dark:bg-gray-800 dark:border-gray-700 min-h-[500px]">
-        {/* 
-          IMPORTANT: To use the real LLM (mockMode={false}), you need an OpenAI API key.
+        {/*
+          IMPORTANT: To use the real LLM (mockMode={false}), you need an Anthropic API key.
           1. Create a file named `.env.local` in the `examples/basic-demo` directory.
           2. Add your API key to this file like so:
-             NEXT_PUBLIC_OPENAI_API_KEY=YOUR_API_KEY_HERE
-          Replace YOUR_API_KEY_HERE with your actual key (e.g., sk-...).
+             NEXT_PUBLIC_ANTHROPIC_API_KEY=YOUR_API_KEY_HERE
+          Replace YOUR_API_KEY_HERE with your actual key (e.g., sk-ant-...).
           The `NEXT_PUBLIC_` prefix is required by Next.js to expose the variable to the browser.
         */}
         <AutoUI
@@ -119,7 +119,7 @@ export default function Home() {
           // AutoUI uses this schema information when planning the UI with the LLM.
           schema={exampleSchema}
           goal="Create a task management dashboard with list view and ability to view task details, and modify task details and status"
-          openaiApiKey={process.env.NEXT_PUBLIC_OPENAI_API_KEY}
+          apiKey={process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY || ''}
           debugMode={true}
           componentAdapter="shadcn"
           userContext={{

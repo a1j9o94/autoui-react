@@ -151,8 +151,8 @@ export interface AutoUIProps
   // Planning configuration
   planningConfig?: PlanningConfig;
 
-  // Add the openaiApiKey prop here
-  openaiApiKey: string;
+  // API key for the LLM (Anthropic)
+  apiKey: string;
 }
 
 /**
@@ -185,7 +185,7 @@ export const AutoUI: React.FC<AutoUIProps> = ({
   planningConfig,
   integration = {},
   enablePartialUpdates = true,
-  openaiApiKey,
+  apiKey,
 }) => {
   const stableGoal = React.useMemo(() => goal, [goal]);
 
@@ -217,6 +217,10 @@ export const AutoUI: React.FC<AutoUIProps> = ({
   const [renderedNode, setRenderedNode] = useState<React.ReactElement | null>(
     null
   );
+
+  // Use a ref to track the current resolved layout for event processing
+  // This prevents processEvent from being recreated when layout changes
+  const currentResolvedLayoutRef = useRef<UISpecNode | null>(null);
 
   // Restore effectiveSchema and scopedGoal definitions using stable versions
   const effectiveSchema = stableSchemaProp as Record<string, unknown>;
@@ -292,7 +296,7 @@ export const AutoUI: React.FC<AutoUIProps> = ({
     planningConfig,
     dataContext, // Pass the local dataContext here, engine will use it if its own is empty initially
     enablePartialUpdates,
-    openaiApiKey,
+    apiKey,
   });
 
   const eventManagerRef = useRef(new EventManager());
@@ -330,11 +334,16 @@ export const AutoUI: React.FC<AutoUIProps> = ({
     };
   }, [eventHooks]);
 
+  // Keep ref in sync with state
+  useEffect(() => {
+    currentResolvedLayoutRef.current = currentResolvedLayoutForRender;
+  }, [currentResolvedLayoutForRender]);
+
   const processEvent = useCallback(
     async (event: UIEvent) => {
       setUiStatus("event_processing");
-      // Use currentResolvedLayoutForRender as the layout active when the event occurred
-      const layoutAtEventTime = currentResolvedLayoutForRender;
+      // Use ref to get layout without causing callback to be recreated when layout changes
+      const layoutAtEventTime = currentResolvedLayoutRef.current;
 
       const shouldProceed = await eventManagerRef.current.processEvent(event);
       if (onEvent) onEvent(event);
@@ -403,8 +412,7 @@ export const AutoUI: React.FC<AutoUIProps> = ({
       handleEvent,
       onEvent,
       eventManagerRef,
-      currentResolvedLayoutForRender,
-      // state.layout, // No longer directly using state.layout here for this callback's logic concerning handleEvent's second arg
+      // currentResolvedLayoutForRender removed - using ref instead to prevent infinite loops
       // setUiStatus is implicitly available
     ]
   );
@@ -537,13 +545,14 @@ export const AutoUI: React.FC<AutoUIProps> = ({
       }
     };
     renderLayout();
+  // Note: uiStatus intentionally removed from deps to prevent infinite loop
+  // (this effect sets uiStatus, so having it as dep causes re-run)
   }, [
     currentResolvedLayoutForRender,
     componentAdapter,
     processEvent,
     isResolvingBindings,
     state.loading,
-    uiStatus,
   ]);
 
   // Initial status setting
@@ -571,6 +580,46 @@ export const AutoUI: React.FC<AutoUIProps> = ({
       }
     }
   }, [state.loading, state.layout, state.error, uiStatus, isResolvingBindings]);
+
+  // Debug instrumentation: Expose pipeline state to browser for Playwright debugging
+  useEffect(() => {
+    if (!debugMode) return;
+
+    const pipelineState = {
+      uiStatus,
+      hasLayout: !!state.layout,
+      layoutId: state.layout?.id || null,
+      hasResolvedLayout: !!currentResolvedLayoutForRender,
+      resolvedLayoutId: currentResolvedLayoutForRender?.id || null,
+      hasRenderedNode: !!renderedNode,
+      isResolvingBindings,
+      isLoading: state.loading,
+      hasError: !!state.error,
+      error: state.error || null,
+      dataContextKeys: Object.keys(dataContext),
+      timestamp: Date.now(),
+    };
+
+    // Expose to window for Playwright
+    if (typeof window !== 'undefined') {
+      (window as any).__autoui_pipeline_state = pipelineState;
+      (window as any).__autoui_pipeline_history = (window as any).__autoui_pipeline_history || [];
+      (window as any).__autoui_pipeline_history.push(pipelineState);
+
+      // Log state changes for debugging
+      console.log('[PIPELINE_STATE]', JSON.stringify(pipelineState));
+    }
+  }, [
+    debugMode,
+    uiStatus,
+    state.layout,
+    state.loading,
+    state.error,
+    currentResolvedLayoutForRender,
+    renderedNode,
+    isResolvingBindings,
+    dataContext,
+  ]);
 
   if (!componentsAvailable) {
     return (

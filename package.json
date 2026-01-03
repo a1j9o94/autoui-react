@@ -1,6 +1,6 @@
 {
   "name": "autoui-react",
-  "version": "0.0.2-alpha",
+  "version": "0.0.2",
   "description": "Generate goal-oriented UIs in real-time using LLMs and your data schema",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -41,6 +41,7 @@
     "react-dom": "^18.0.0"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.2",
     "@ai-sdk/openai": "^1.3.22",
     "@hookform/resolvers": "^5.0.1",
     "@radix-ui/react-checkbox": "^1.3.1",

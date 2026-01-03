@@ -14,7 +14,7 @@ import { DataContext } from "./bindings"; // Import DataContext
 export interface UseUIStateEngineOptions {
   schema: Record<string, unknown>;
   goal: string;
-  openaiApiKey: string;
+  apiKey: string;
   userContext?: Record<string, unknown> | undefined;
   planningConfig?: PlanningConfig | undefined;
   dataContext?: Record<string, unknown> | undefined;
@@ -29,7 +29,7 @@ export interface UseUIStateEngineOptions {
 export function useUIStateEngine({
   schema,
   goal,
-  openaiApiKey = "",
+  apiKey = "",
   userContext,
   planningConfig,
   dataContext = {},
@@ -46,7 +46,7 @@ export function useUIStateEngine({
 
   const [state, dispatch] = useReducer(uiReducer, initialState);
   const stateRef = useRef<UIState>(state); // Ref to hold the current state
-  const router = new ActionRouter(openaiApiKey, planningConfig);
+  const router = new ActionRouter(apiKey, planningConfig);
 
   useEffect(() => {
     stateRef.current = state; // Keep the ref updated with the latest state
@@ -92,7 +92,7 @@ export function useUIStateEngine({
           layoutForRouting,
           contextForRouting,
           goal,
-          openaiApiKey,
+          apiKey,
           userContext
         );
 
@@ -174,7 +174,7 @@ export function useUIStateEngine({
       schema,
       userContext,
       dataContext,
-      openaiApiKey,
+      apiKey,
       enablePartialUpdates,
       dispatch,
     ]
@@ -198,7 +198,7 @@ export function useUIStateEngine({
           stateRef.current.layout,
           dataContext,
           goal,
-          openaiApiKey,
+          apiKey,
           userContext
         );
 
@@ -243,7 +243,7 @@ export function useUIStateEngine({
     // For diagnostic purposes in tests, temporarily making dependencies very minimal.
     // If tests pass, we need to carefully evaluate which of these truly need to trigger a re-fetch.
     // `goal` and `schema` are strong candidates for re-fetching. `dispatch` is stable.
-    // `router`, `userContext`, `mockMode`, `openaiApiKey`, `dataContext` are less likely to need to trigger a full re-fetch IF the initial call was successful.
+    // `router`, `userContext`, `mockMode`, `apiKey`, `dataContext` are less likely to need to trigger a full re-fetch IF the initial call was successful.
   }, [goal, schema, dispatch]); // Highly restricted dependencies for testing
 
   return {

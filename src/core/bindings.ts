@@ -234,9 +234,22 @@ export function processBinding(
       // );
       // --- DEBUG LOGGING END ---
 
-      // For path strings, prefer context unless itemData is explicitly targeted (e.g. via "item." prefix handled above)
-      // or if it's a simple property name that might exist on itemData.
-      // Given current logic, exact paths like "item.name" are handled by EXACT, "title" could be item or context.
+      // Handle plain path bindings (without {{}}) that reference item data
+      // Check for "item." or "row." prefix first
+      if (
+        (pathToResolve.startsWith("item.") || pathToResolve.startsWith("row.")) &&
+        itemData
+      ) {
+        if (pathToResolve.startsWith("item.")) {
+          resolvedValue = getValueByPath(itemData, pathToResolve.substring(5));
+        } else {
+          resolvedValue = getValueByPath(itemData, pathToResolve.substring(4));
+        }
+        if (resolvedValue !== undefined) {
+          return resolvedValue;
+        }
+      }
+
       // If itemData exists and path is a direct property of itemData (no dots)
       if (
         itemData &&
@@ -474,14 +487,15 @@ export async function resolveBindings(
     // }
 
     // Check if the children are already instantiated items or a template
-    // A simple heuristic: if the first child's ID does not strictly match the template ID we expect.
-    // This assumes a single template child in the spec from the planner.
+    // A template has exactly 1 child with template markers ({{index}}, {{item, etc.) in the ID
+    // Expanded lists have multiple children with concrete IDs
     const templateChild = node.children[0];
-    const isAlreadyExpanded =
-      node.children.length > 1 ||
-      (node.children.length === 1 && templateChild.id !== "taskItem-template");
+    const looksLikeTemplate =
+      node.children.length === 1 &&
+      (templateChild.id.includes("{{") || templateChild.id.includes("-template"));
+    const isAlreadyExpanded = !looksLikeTemplate && node.children.length > 1;
 
-    if (isAlreadyExpanded && node.id === "task-list") {
+    if (isAlreadyExpanded) {
       // console.log(
       //   `[resolveBindings Debug] ListView ${node.id} appears to be already expanded. Re-resolving its existing children.`
       // );
