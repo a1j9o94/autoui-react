@@ -1,6 +1,6 @@
 {
   "name": "autoui-react",
-  "version": "0.0.2",
+  "version": "0.1.1-alpha",
   "description": "Generate goal-oriented UIs in real-time using LLMs and your data schema",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
